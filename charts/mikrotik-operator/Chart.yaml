@@ -2,8 +2,11 @@ apiVersion: v2
 name: mikrotik-operator
 description: Kubernetes operator for managing MikroTik RouterOS configuration
 type: application
-version: 0.3.1
-appVersion: v0.3.0
+# Chart package version. Independent of operator image tags. Bump this whenever
+# the packaged chart changes, including appVersion updates.
+version: 0.1.0
+# Default operator and admin UI image tag when image.tag / ui.image.tag are empty.
+appVersion: v0.1.0
 keywords:
 - kubernetes
 - operator

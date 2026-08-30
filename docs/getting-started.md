@@ -56,13 +56,15 @@ The Secret must contain the keys `username` and `password`.
 ```sh
 helm upgrade --install mikrotik-operator \
   oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator \
+  --version 0.1.0 \
   --namespace mikrotik-operator-system \
   --create-namespace
 ```
 
-For a source checkout, replace the OCI chart reference with
-`./charts/mikrotik-operator`. Pin the image tag or digest for production
-deployments.
+Chart versions and operator image tags are independent. The chart's
+`appVersion` is the default image tag when `image.tag` is empty. For a source
+checkout, replace the OCI chart reference with `./charts/mikrotik-operator`.
+Pin the image tag or digest for production deployments.
 
 ## Define a router
 
@@ -120,6 +122,7 @@ Or upgrade an existing chart install:
 ```sh
 helm upgrade --install mikrotik-operator \
   oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator \
+  --version 0.1.0 \
   --namespace mikrotik-operator-system \
   --create-namespace \
   --set ui.enabled=true

@@ -81,7 +81,7 @@ The chart installs the operator, RBAC, CRDs, probes, and the `mikrotik`
 helm upgrade --install mikrotik-operator ./charts/mikrotik-operator \
   --namespace mikrotik-operator-system \
   --create-namespace \
-  --set image.tag=v0.3.0
+  --set image.tag=v0.1.0
 ```
 
 The raw Kubernetes resources are also available under [`config/`](config/).
@@ -230,10 +230,14 @@ cd web/ui && npm ci && npm run build
 ```
 
 GitHub Actions validates formatting, tests, race tests, vet, vulnerability
-scanning, Go linting, Docker builds, Helm resources, Kubernetes manifests, and
-workflow syntax. Trusted version tags publish the operator and admin UI
-container images and the Helm chart to GHCR. Dependabot opens grouped weekly
-updates for Go modules, GitHub Actions, and pinned container images.
+scanning, Go linting, Docker builds, Helm resources, Kubernetes manifests,
+workflow syntax, and the GoReleaser configuration. Trusted `vMAJOR.MINOR.PATCH`
+tags publish multi-arch operator and admin UI images with GoReleaser. Helm
+chart packages are published from `main` when `charts/mikrotik-operator/Chart.yaml`
+gets a new version, independent of image tags. GitHub Releases contain
+changelog notes only; the operator is consumed as a container, not as a
+standalone binary. Dependabot opens grouped weekly updates for Go modules,
+GitHub Actions, and pinned container images.
 
 ## Contributing
 
