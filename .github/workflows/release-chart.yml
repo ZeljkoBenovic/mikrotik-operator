@@ -1,0 +1,72 @@
+name: Release Helm chart
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'charts/mikrotik-operator/**'
+      - '.github/workflows/release-chart.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-chart
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: Chart quality gate
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish Helm chart
+    needs: ci
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Read chart version
+        id: chart
+        env:
+          CHART_FILE: charts/mikrotik-operator/Chart.yaml
+        run: |
+          version="$(awk '/^version:/ { print $2; exit }' "$CHART_FILE")"
+          app_version="$(awk '/^appVersion:/ { print $2; exit }' "$CHART_FILE")"
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Chart.yaml version must be MAJOR.MINOR.PATCH: $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "app_version=$app_version" >> "$GITHUB_OUTPUT"
+          echo "Publishing chart version $version (appVersion $app_version)"
+
+      - name: Log in to Helm registry
+        env:
+          HELM_REGISTRY_USER: ${{ github.actor }}
+          HELM_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$HELM_REGISTRY_PASSWORD" | helm registry login ghcr.io --username "$HELM_REGISTRY_USER" --password-stdin
+
+      - name: Publish chart
+        env:
+          CHART_VERSION: ${{ steps.chart.outputs.version }}
+        run: |
+          chart_ref="oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator"
+          if helm show chart "$chart_ref" --version "$CHART_VERSION" >/dev/null 2>&1; then
+            echo "Chart version $CHART_VERSION already exists at $chart_ref; skipping"
+            exit 0
+          fi
+          helm package charts/mikrotik-operator
+          helm push "mikrotik-operator-${CHART_VERSION}.tgz" oci://ghcr.io/zeljkobenovic/charts

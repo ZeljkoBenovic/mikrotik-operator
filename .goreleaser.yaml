@@ -1,0 +1,188 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# Container-only release for the Kubernetes operator. Binaries stay internal to
+# the image build; nothing is uploaded as a GitHub Release asset.
+version: 2
+
+project_name: mikrotik-operator
+
+before:
+  hooks:
+    - npm --prefix web/ui ci
+    - npm --prefix web/ui run build
+
+builds:
+  - id: manager
+    main: ./cmd/manager
+    binary: manager
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: ui-backend
+    main: ./cmd/ui-backend
+    binary: ui-backend
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats:
+      - tar.gz
+    format_overrides:
+      - goos: linux
+        formats:
+          - none
+
+checksum:
+  disable: true
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^Merge pull request"
+      - "^Merge branch"
+
+release:
+  skip_upload: true
+  prerelease: auto
+  footer: |
+    ## Container images
+
+    - `ghcr.io/zeljkobenovic/mikrotik-operator:{{ .Tag }}`
+    - `ghcr.io/zeljkobenovic/mikrotik-operator-ui:{{ .Tag }}`
+
+    Helm chart versions are published separately from `charts/mikrotik-operator/Chart.yaml`.
+    Install with `oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator`.
+
+dockers:
+  - id: operator-linux-amd64
+    ids:
+      - manager
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile.release
+    use: buildx
+    image_templates:
+      - "ghcr.io/zeljkobenovic/mikrotik-operator:{{ .Tag }}-amd64"
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title=mikrotik-operator"
+      - "--label=org.opencontainers.image.description=Kubernetes operator for MikroTik RouterOS"
+      - "--label=org.opencontainers.image.source=https://github.com/ZeljkoBenovic/mikrotik-operator"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+
+  - id: operator-linux-arm64
+    ids:
+      - manager
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile.release
+    use: buildx
+    image_templates:
+      - "ghcr.io/zeljkobenovic/mikrotik-operator:{{ .Tag }}-arm64"
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title=mikrotik-operator"
+      - "--label=org.opencontainers.image.description=Kubernetes operator for MikroTik RouterOS"
+      - "--label=org.opencontainers.image.source=https://github.com/ZeljkoBenovic/mikrotik-operator"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+
+  - id: ui-linux-amd64
+    ids:
+      - ui-backend
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile.ui.release
+    use: buildx
+    extra_files:
+      - web/ui/dist
+    image_templates:
+      - "ghcr.io/zeljkobenovic/mikrotik-operator-ui:{{ .Tag }}-amd64"
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title=mikrotik-operator-ui"
+      - "--label=org.opencontainers.image.description=Admin UI for the MikroTik Kubernetes operator"
+      - "--label=org.opencontainers.image.source=https://github.com/ZeljkoBenovic/mikrotik-operator"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+
+  - id: ui-linux-arm64
+    ids:
+      - ui-backend
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile.ui.release
+    use: buildx
+    extra_files:
+      - web/ui/dist
+    image_templates:
+      - "ghcr.io/zeljkobenovic/mikrotik-operator-ui:{{ .Tag }}-arm64"
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title=mikrotik-operator-ui"
+      - "--label=org.opencontainers.image.description=Admin UI for the MikroTik Kubernetes operator"
+      - "--label=org.opencontainers.image.source=https://github.com/ZeljkoBenovic/mikrotik-operator"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+
+docker_manifests:
+  - id: operator
+    name_template: "ghcr.io/zeljkobenovic/mikrotik-operator:{{ .Tag }}"
+    image_templates:
+      - "ghcr.io/zeljkobenovic/mikrotik-operator:{{ .Tag }}-amd64"
+      - "ghcr.io/zeljkobenovic/mikrotik-operator:{{ .Tag }}-arm64"
+
+  - id: operator-latest
+    name_template: "ghcr.io/zeljkobenovic/mikrotik-operator:latest"
+    skip_push: auto
+    image_templates:
+      - "ghcr.io/zeljkobenovic/mikrotik-operator:{{ .Tag }}-amd64"
+      - "ghcr.io/zeljkobenovic/mikrotik-operator:{{ .Tag }}-arm64"
+
+  - id: ui
+    name_template: "ghcr.io/zeljkobenovic/mikrotik-operator-ui:{{ .Tag }}"
+    image_templates:
+      - "ghcr.io/zeljkobenovic/mikrotik-operator-ui:{{ .Tag }}-amd64"
+      - "ghcr.io/zeljkobenovic/mikrotik-operator-ui:{{ .Tag }}-arm64"
+
+  - id: ui-latest
+    name_template: "ghcr.io/zeljkobenovic/mikrotik-operator-ui:latest"
+    skip_push: auto
+    image_templates:
+      - "ghcr.io/zeljkobenovic/mikrotik-operator-ui:{{ .Tag }}-amd64"
+      - "ghcr.io/zeljkobenovic/mikrotik-operator-ui:{{ .Tag }}-arm64"

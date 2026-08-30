@@ -7,12 +7,11 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 env:
+  GO_VERSION: '1.27.x'
+  NODE_VERSION: '22'
   REGISTRY: ghcr.io
-  IMAGE_NAME: zeljkobenovic/mikrotik-operator
-  IMAGE_NAME_UI: zeljkobenovic/mikrotik-operator-ui
 
 jobs:
   ci:
@@ -20,12 +19,21 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   publish:
-    name: Publish image and Helm chart
+    name: Publish container images
     needs: ci
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      packages: write
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --force --tags
 
       - name: Validate release tag
         env:
@@ -35,6 +43,22 @@ jobs:
             echo "Release tag must match vMAJOR.MINOR.PATCH: $RELEASE_VERSION"
             exit 1
           fi
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/ui/package-lock.json
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -46,62 +70,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate image tags
-        id: metadata
-        uses: docker/metadata-action@v5
+      - name: Publish container images
+        uses: goreleaser/goreleaser-action@v7
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=tag
-            type=raw,value=latest
-
-      - name: Publish image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Generate UI image tags
-        id: metadata-ui
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_UI }}
-          tags: |
-            type=ref,event=tag
-            type=raw,value=latest
-
-      - name: Publish UI image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.ui
-          push: true
-          tags: ${{ steps.metadata-ui.outputs.tags }}
-          labels: ${{ steps.metadata-ui.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha,scope=mikrotik-operator-ui
-          cache-to: type=gha,mode=max,scope=mikrotik-operator-ui
-
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
-
-      - name: Log in to Helm registry
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
         env:
-          HELM_REGISTRY_USER: ${{ github.actor }}
-          HELM_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "$HELM_REGISTRY_PASSWORD" | helm registry login ghcr.io --username "$HELM_REGISTRY_USER" --password-stdin
-
-      - name: Publish chart
-        env:
-          RELEASE_VERSION: ${{ github.ref_name }}
-        run: |
-          version="${RELEASE_VERSION#v}"
-          helm package charts/mikrotik-operator \
-            --version "$version" \
-            --app-version "$RELEASE_VERSION"
-          helm push "mikrotik-operator-${version}.tgz" oci://ghcr.io/zeljkobenovic/charts
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKER_CLI_EXPERIMENTAL: enabled

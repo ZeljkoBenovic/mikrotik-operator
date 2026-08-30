@@ -286,3 +286,10 @@ jobs:
 
       - name: Validate workflows
         run: actionlint
+
+      - name: Check GoReleaser configuration
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: check
