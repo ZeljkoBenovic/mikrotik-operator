@@ -38,11 +38,15 @@ jobs:
 
       - name: Run tests
         shell: bash
-        run: go test -race -shuffle=on $(go list ./... | grep -v /node_modules/)
+        run: |
+          mapfile -t packages < <(go list ./... | grep -v /node_modules/ || true)
+          go test -race -shuffle=on "${packages[@]}"
 
       - name: Run vet
         shell: bash
-        run: go vet $(go list ./... | grep -v /node_modules/)
+        run: |
+          mapfile -t packages < <(go list ./... | grep -v /node_modules/ || true)
+          go vet "${packages[@]}"
 
       - name: Build
         run: |
@@ -51,7 +55,7 @@ jobs:
 
       - name: Run vulnerability check
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
 
       - name: Run Go linter
