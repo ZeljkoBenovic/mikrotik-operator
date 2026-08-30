@@ -59,7 +59,8 @@ Use the narrowest applicable skill first. Load referenced material only when the
 ## CI/CD and security rules
 
 - Pull requests and `main` must run formatting, tests, race tests, vet, vulnerability checks, Go linting, Docker build validation, Helm validation, manifest validation, and workflow linting.
-- Publishing is allowed only from trusted semantic-version tags and must depend on the complete quality gate.
+- Publishing container images is allowed only from trusted semantic-version tags and must depend on the complete quality gate.
+- Publishing Helm charts is allowed only from `main` after Helm chart validation, using the version in `charts/mikrotik-operator/Chart.yaml`. Do not stamp chart versions from operator image tags. Do not run application tests or e2e suites in the chart pipeline.
 - Publish images and charts with `GITHUB_TOKEN`; never commit credentials or embed secrets in images, manifests, examples, or logs.
 - Treat GitHub Actions expressions and shell inputs as untrusted. Quote variables and avoid executing pull-request-controlled strings.
 - Do not push, publish, deploy, or modify a live cluster unless the user explicitly requests that action.
@@ -77,6 +78,6 @@ helm lint charts/mikrotik-operator
 helm template validation charts/mikrotik-operator --include-crds
 ```
 
-For Kubernetes changes, use the local k3s kubeconfig when available and run a server-side dry run. For release changes, run `actionlint` and verify that chart/image publishing is tag-gated.
+For Kubernetes changes, use the local k3s kubeconfig when available and run a server-side dry run. For release changes, run `actionlint`, `goreleaser check`, and verify that image publishing is tag-gated and chart publishing is driven by `Chart.yaml` on `main`.
 
 Report assumptions, validations performed, external-cluster limitations, and rollback/recovery notes in the final response.
