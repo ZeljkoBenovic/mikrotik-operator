@@ -1,0 +1,14 @@
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikPortForward
+metadata:
+  name: web
+  annotations:
+    mikrotik.operator.io/public-ip: 203.0.113.10
+spec:
+  routerRef: home-router
+  protocol: tcp
+  externalPort: 443
+  targetPort: 8443
+  serviceRef:
+    namespace: default
+    name: web

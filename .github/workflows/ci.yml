@@ -1,0 +1,284 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.27.x'
+  NODE_VERSION: '22'
+  KUBERNETES_VERSION: '1.37.0'
+
+jobs:
+  go:
+    name: Go quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Check formatting
+        shell: bash
+        run: test -z "$(gofmt -l cmd internal api hack)"
+
+      - name: Verify Go modules
+        run: go mod verify
+
+      - name: Run tests
+        shell: bash
+        run: go test -race -shuffle=on $(go list ./... | grep -v /node_modules/)
+
+      - name: Run vet
+        shell: bash
+        run: go vet $(go list ./... | grep -v /node_modules/)
+
+      - name: Build
+        run: |
+          go build -trimpath -o bin/manager ./cmd/manager
+          go build -trimpath -o bin/ui-backend ./cmd/ui-backend
+
+      - name: Run vulnerability check
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          govulncheck ./...
+
+      - name: Run Go linter
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13.2
+
+  manifests:
+    name: Kubernetes and Helm validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go tooling
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v5
+        with:
+          version: 'v${{ env.KUBERNETES_VERSION }}'
+
+      - name: Install kubeconform
+        run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7
+
+      - name: Lint chart
+        run: |
+          helm lint charts/mikrotik-operator
+          helm lint charts/mikrotik-operator --set ui.enabled=true
+
+      - name: Validate rendered built-in Kubernetes resources
+        run: |
+          helm template validation charts/mikrotik-operator --include-crds > rendered.yaml
+          kubeconform \
+            -strict \
+            -summary \
+            -ignore-missing-schemas \
+            -kubernetes-version "${KUBERNETES_VERSION}" \
+            rendered.yaml
+          go run ./hack/uichart -ui=false rendered.yaml
+          go run ./hack/uichart -ui=false -notes charts/mikrotik-operator/templates/NOTES.txt rendered.yaml
+
+      - name: Validate rendered UI resources
+        run: |
+          helm template validation charts/mikrotik-operator --include-crds --set ui.enabled=true > rendered-ui.yaml
+          kubeconform \
+            -strict \
+            -summary \
+            -ignore-missing-schemas \
+            -kubernetes-version "${KUBERNETES_VERSION}" \
+            rendered-ui.yaml
+          go run ./hack/uichart -ui=true rendered-ui.yaml
+          go run ./hack/uichart -ui=true -notes charts/mikrotik-operator/templates/NOTES.txt rendered-ui.yaml
+          helm template validation charts/mikrotik-operator --include-crds --set ui.enabled=true --set ui.rbac.create=false > rendered-ui-norbac.yaml
+          go run ./hack/uichart -ui=true -rbac=false rendered-ui-norbac.yaml
+
+      - name: Validate raw rendered built-in Kubernetes resources
+        run: |
+          kubectl kustomize config > raw.yaml
+          kubeconform \
+            -strict \
+            -summary \
+            -ignore-missing-schemas \
+            -kubernetes-version "${KUBERNETES_VERSION}" \
+            raw.yaml
+
+      - name: Validate CRD schemas with Kubernetes APIs
+        run: |
+          go run ./hack/crdvalidate config/crd/bases
+          go run ./hack/crdvalidate charts/mikrotik-operator/crds
+
+      - name: Validate CRD policy conventions
+        run: |
+          python3 skills/kubernetes-operator/scripts/crd_validator.py --crd config/crd
+          python3 skills/kubernetes-operator/scripts/crd_validator.py --crd charts/mikrotik-operator/crds
+
+      - name: Verify raw and Helm CRD parity
+        shell: bash
+        run: |
+          check_pair() {
+            if ! cmp --silent "$1" "$2"; then
+              echo "CRD copies differ: $1 != $2"
+              return 1
+            fi
+          }
+          check_pair config/crd/bases/mikrotik.operator.io_mikrotikdnsrecords.yaml charts/mikrotik-operator/crds/mikrotikdnsrecords.yaml
+          check_pair config/crd/bases/mikrotik.operator.io_mikrotikfirewallrules.yaml charts/mikrotik-operator/crds/mikrotikfirewallrules.yaml
+          check_pair config/crd/bases/mikrotik.operator.io_mikrotikportforwards.yaml charts/mikrotik-operator/crds/mikrotikportforwards.yaml
+          check_pair config/crd/bases/mikrotik.operator.io_mikrotikrouters.yaml charts/mikrotik-operator/crds/mikrotikrouters.yaml
+          check_pair config/crd/bases/mikrotik.operator.io_mikrotikroutes.yaml charts/mikrotik-operator/crds/mikrotikroutes.yaml
+
+  ui:
+    name: UI frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/ui
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  docker:
+    name: Build container
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: mikrotik-operator:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build UI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ui
+          push: false
+          tags: mikrotik-operator-ui:ci
+          cache-from: type=gha,scope=mikrotik-operator-ui
+          cache-to: type=gha,mode=max,scope=mikrotik-operator-ui
+
+  e2e-ui:
+    name: Admin UI end-to-end
+    needs: [go, manifests, ui, docker, workflow]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v5
+        with:
+          version: 'v${{ env.KUBERNETES_VERSION }}'
+
+      - name: Install k3d
+        shell: bash
+        run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+      - name: Run Admin UI E2E suite
+        shell: bash
+        run: make e2e-ui-test
+
+  e2e:
+    name: RouterOS end-to-end
+    needs: [go, manifests, ui, docker, workflow]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install k3d
+        shell: bash
+        run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+      - name: Run RouterOS-backed E2E suite
+        shell: bash
+        run: make e2e-test
+
+  workflow:
+    name: Workflow validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go tooling
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+      - name: Validate workflows
+        run: actionlint

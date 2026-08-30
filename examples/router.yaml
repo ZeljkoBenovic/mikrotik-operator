@@ -1,0 +1,9 @@
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikRouter
+metadata:
+  name: home-router
+spec:
+  address: 192.168.88.1
+  tls: true
+  credentialsSecret:
+    name: mikrotik-credentials

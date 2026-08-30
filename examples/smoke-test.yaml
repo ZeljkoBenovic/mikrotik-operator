@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mikrotik-operator-smoke
+  labels:
+    app: mikrotik-operator-smoke
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mikrotik-operator-smoke
+  template:
+    metadata:
+      labels:
+        app: mikrotik-operator-smoke
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.27-alpine
+        ports:
+        - name: http
+          containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mikrotik-operator-smoke
+  annotations:
+    mikrotik.operator.io/dns-name: smoke.home.arpa
+spec:
+  type: ClusterIP
+  selector:
+    app: mikrotik-operator-smoke
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+---
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikRouter
+metadata:
+  name: local-router
+spec:
+  address: 10.0.20.254
+  credentialsSecret:
+    name: local-router-credentials

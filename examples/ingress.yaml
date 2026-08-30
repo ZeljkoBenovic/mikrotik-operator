@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mikrotik-operator-smoke-ingress
+spec:
+  ingressClassName: mikrotik
+  rules:
+  - host: ingress.home.arpa
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: mikrotik-operator-smoke
+            port:
+              number: 80

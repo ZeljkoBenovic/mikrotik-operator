@@ -1,0 +1,10 @@
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikRoute
+metadata:
+  name: private-network
+  namespace: default
+spec:
+  routerRef: local-router
+  destination: 10.50.50.1/32
+  gateway: 10.0.20.10
+  distance: 1

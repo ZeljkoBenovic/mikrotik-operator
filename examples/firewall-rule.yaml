@@ -1,0 +1,16 @@
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikFirewallRule
+metadata:
+  name: allow-cluster-network
+  namespace: default
+spec:
+  routerRef: local-router
+  chain: forward
+  action: accept
+  sourceAddress: 10.0.20.0/24
+  destinationAddress: 10.43.0.0/16
+  connectionState:
+  - new
+  - established
+  - related
+  placeBefore: true

@@ -1,0 +1,5 @@
+domain: operator.io
+layout: go.kubebuilder.io/v4
+projectName: mikrotik-operator
+repo: github.com/ZeljkoBenovic/mikrotik-operator
+version: "3"

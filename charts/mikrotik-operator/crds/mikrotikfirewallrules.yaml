@@ -1,0 +1,91 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mikrotikfirewallrules.mikrotik.operator.io
+spec:
+  group: mikrotik.operator.io
+  names:
+    kind: MikroTikFirewallRule
+    listKind: MikroTikFirewallRuleList
+    plural: mikrotikfirewallrules
+    singular: mikrotikfirewallrule
+    shortNames:
+    - mtfw
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - name: Chain
+      type: string
+      jsonPath: .spec.chain
+    - name: Action
+      type: string
+      jsonPath: .spec.action
+    - name: Ready
+      type: string
+      jsonPath: .status.conditions[?(@.type=="Ready")].status
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [chain, action]
+            properties:
+              routerRef: {type: string}
+              chain: {type: string}
+              action: {type: string}
+              protocol: {type: string}
+              sourceAddress: {type: string}
+              destinationAddress: {type: string}
+              sourcePort: {type: string}
+              destinationPort: {type: string}
+              inInterface: {type: string}
+              outInterface: {type: string}
+              connectionState:
+                type: array
+                items: {type: string}
+              connectionNatState:
+                type: array
+                items: {type: string}
+              logPrefix: {type: string}
+              placeBefore: {type: boolean}
+          status:
+            type: object
+            properties:
+              applied:
+                type: boolean
+              routerRef:
+                type: string
+              conditions:
+                type: array
+                items:
+                  type: object
+                  required: [lastTransitionTime, message, reason, status, type]
+                  properties:
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    message:
+                      type: string
+                    observedGeneration:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                    reason:
+                      type: string
+                      minLength: 1
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    type:
+                      type: string
+                      minLength: 1
+    subresources:
+      status: {}

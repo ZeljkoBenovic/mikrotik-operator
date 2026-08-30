@@ -1,0 +1,83 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "mikrotik-operator.fullname" . }}
+  labels:
+    {{- include "mikrotik-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - mikrotik.operator.io
+  resources:
+  - mikrotikrouters
+  - mikrotikdnsrecords
+  - mikrotikportforwards
+  - mikrotikroutes
+  - mikrotikfirewallrules
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups:
+  - mikrotik.operator.io
+  resources:
+  - mikrotikrouters/status
+  - mikrotikdnsrecords/status
+  - mikrotikportforwards/status
+  - mikrotikroutes/status
+  - mikrotikfirewallrules/status
+  verbs: [get, update, patch]
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  - pods
+  - nodes
+  verbs: [get, list, watch]
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs: [get, list, watch, update]
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs: [get, list, watch]
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  - ingressclasses
+  verbs: [get, list, watch]
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  - gateways
+  - gatewayclasses
+  - referencegrants
+  verbs: [get, list, watch]
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs: [create, patch]
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs: [get, list, watch, create, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "mikrotik-operator.fullname" . }}
+  labels:
+    {{- include "mikrotik-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "mikrotik-operator.fullname" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "mikrotik-operator.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -1,0 +1,124 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mikrotikportforwards.mikrotik.operator.io
+spec:
+  group: mikrotik.operator.io
+  names:
+    kind: MikroTikPortForward
+    listKind: MikroTikPortForwardList
+    plural: mikrotikportforwards
+    singular: mikrotikportforward
+    shortNames:
+    - mtpf
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - name: Protocol
+      type: string
+      jsonPath: .spec.protocol
+    - name: ExternalPort
+      type: integer
+      jsonPath: .spec.externalPort
+    - name: Target
+      type: string
+      jsonPath: .status.targetAddress
+    - name: Ready
+      type: string
+      jsonPath: .status.conditions[?(@.type=="Ready")].status
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            x-kubernetes-validations:
+            - rule: >-
+                (has(self.targetAddress) && !has(self.podRef)) ||
+                (!has(self.targetAddress) && has(self.serviceRef) && !has(self.podRef)) ||
+                (!has(self.targetAddress) && !has(self.serviceRef) && has(self.podRef))
+              message: spec must target an address, Service, or Pod; targetAddress may be combined only with serviceRef for dependency tracking
+            required: [routerRef, protocol, externalPort, targetPort]
+            properties:
+              routerRef:
+                type: string
+              protocol:
+                type: string
+                enum: [tcp, udp]
+              externalPort:
+                type: integer
+                format: int32
+                minimum: 1
+                maximum: 65535
+              targetPort:
+                type: integer
+                format: int32
+                minimum: 1
+                maximum: 65535
+              targetAddress:
+                type: string
+                minLength: 1
+              serviceRef:
+                type: object
+                required: [name]
+                properties:
+                  namespace:
+                    type: string
+                  name:
+                    type: string
+                    minLength: 1
+              podRef:
+                type: object
+                required: [name]
+                properties:
+                  namespace:
+                    type: string
+                  name:
+                    type: string
+                    minLength: 1
+          status:
+            type: object
+            properties:
+              applied:
+                type: boolean
+              routerID:
+                type: string
+              routerRef:
+                type: string
+              targetAddress:
+                type: string
+              externalAddress:
+                type: string
+              conditions:
+                type: array
+                items:
+                  type: object
+                  required: [lastTransitionTime, message, reason, status, type]
+                  properties:
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    message:
+                      type: string
+                    observedGeneration:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                    reason:
+                      type: string
+                      minLength: 1
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    type:
+                      type: string
+                      minLength: 1
+    subresources:
+      status: {}

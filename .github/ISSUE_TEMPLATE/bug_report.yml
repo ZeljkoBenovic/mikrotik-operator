@@ -1,0 +1,41 @@
+name: Bug report
+description: Report an operator, RouterOS, Kubernetes, Helm, or CI problem.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please remove credentials, public secrets, and sensitive router details before submitting.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and the expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include operator version, Kubernetes distribution/version, and RouterOS version.
+      placeholder: |
+        Operator:
+        Kubernetes/k3s:
+        RouterOS:
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include the smallest safe manifest or command sequence that reproduces the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or status
+      description: Paste redacted controller logs, resource status, or RouterOS rule output.
+      render: text

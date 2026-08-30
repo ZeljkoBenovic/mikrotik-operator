@@ -1,0 +1,11 @@
+.gocache/
+.cache/
+.golangci-cache/
+.omc/
+.tmp/
+bin/
+dist/
+*.tar
+*.tar.gz
+.idea/
+.vscode/
