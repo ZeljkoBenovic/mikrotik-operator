@@ -132,7 +132,7 @@ func TestWriteOwnedConflictBody(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 	body := decodeMap(t, rec)
-	if !strings.Contains(body["error"].(string), "Service/web") {
+	if !strings.Contains(stringField(t, body, "error"), "Service/web") {
 		t.Fatalf("error %v", body["error"])
 	}
 	owner := asMap(t, body["managedBy"])

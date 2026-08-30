@@ -89,7 +89,7 @@ func TestInvalidPathValuesRejected(t *testing.T) {
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status %d want 400 body %s", rec.Code, rec.Body.String())
 			}
-			errMsg, _ := decodeMap(t, rec)["error"].(string)
+			errMsg := stringField(t, decodeMap(t, rec), "error")
 			if !strings.Contains(errMsg, "invalid") {
 				t.Fatalf("error %q", errMsg)
 			}

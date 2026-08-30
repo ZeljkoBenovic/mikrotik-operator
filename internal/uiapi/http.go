@@ -78,7 +78,16 @@ func (h *handler) withMiddleware(next http.Handler) http.Handler {
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		slog.Error("encode json response", "err", err)
+	}
+}
+
+func (h *handler) writePlain(w http.ResponseWriter, r *http.Request, body string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if _, err := io.WriteString(w, body); err != nil {
+		h.log.ErrorContext(r.Context(), "write response", "err", err)
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
@@ -106,14 +115,14 @@ func (h *handler) writeKubeError(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusInternalServerError, "internal error")
 }
 
-func readBody(r *http.Request) ([]byte, error) {
-	defer r.Body.Close()
+func readBody(r *http.Request) (data []byte, err error) {
+	defer func() {
+		if closeErr := r.Body.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	limited := http.MaxBytesReader(nil, r.Body, maxBodyBytes)
-	data, err := io.ReadAll(limited)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
+	return io.ReadAll(limited)
 }
 
 func validKubeName(name string) bool {

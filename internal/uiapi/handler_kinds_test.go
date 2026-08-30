@@ -241,9 +241,9 @@ func TestOverviewReadyCountsAllKinds(t *testing.T) {
 		kindPortForwards:  {Kind: kindPortForwards, Count: 1, NotReady: 0},
 		kindFirewallRules: {Kind: kindFirewallRules, Count: 1, NotReady: 1},
 	}
-	for _, raw := range decodeMap(t, rec)["kinds"].([]any) {
+	for _, raw := range sliceField(t, decodeMap(t, rec), "kinds") {
 		item := asMap(t, raw)
-		kind, _ := item["kind"].(string)
+		kind := stringField(t, item, "kind")
 		got := kindCount{
 			Kind:     kind,
 			Count:    intFromJSON(t, item["count"]),
@@ -347,7 +347,7 @@ func TestOwnedIngressAndHTTPRouteConflict(t *testing.T) {
 				t.Fatalf("status %d %s", rec.Code, rec.Body.String())
 			}
 			body := decodeMap(t, rec)
-			if !strings.Contains(body["error"].(string), tt.owner) {
+			if !strings.Contains(stringField(t, body, "error"), tt.owner) {
 				t.Fatalf("error %v want %s", body["error"], tt.owner)
 			}
 		})

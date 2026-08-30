@@ -60,7 +60,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	kinds, _ := overview["kinds"].([]any)
+	kinds, ok := overview["kinds"].([]any)
+	if !ok {
+		return fmt.Errorf("overview kinds is %T, want array", overview["kinds"])
+	}
 	if len(kinds) != 5 {
 		return fmt.Errorf("overview kinds=%d want 5", len(kinds))
 	}
@@ -150,7 +153,10 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		meta := asMap(got["metadata"])
+		meta, err := asMap(got["metadata"])
+		if err != nil {
+			return fmt.Errorf("get %s metadata: %w", resource.kind, err)
+		}
 		if meta["name"] != resource.name || meta["namespace"] != ns {
 			return fmt.Errorf("get %s metadata %#v", resource.kind, meta)
 		}
@@ -163,7 +169,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	managedBy := asMap(owned["managedBy"])
+	managedBy, err := asMap(owned["managedBy"])
+	if err != nil {
+		return fmt.Errorf("owned managedBy: %w", err)
+	}
 	if managedBy["kind"] != "Service" || managedBy["name"] != "web" {
 		return fmt.Errorf("owned managedBy %#v", managedBy)
 	}
@@ -203,7 +212,7 @@ type httpResult struct {
 	body   string
 }
 
-func do(client *http.Client, method, url string, body io.Reader) (httpResult, error) {
+func do(client *http.Client, method, url string, body io.Reader) (result httpResult, err error) {
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return httpResult{}, err
@@ -216,12 +225,16 @@ func do(client *http.Client, method, url string, body io.Reader) (httpResult, er
 	if err != nil {
 		return httpResult{}, err
 	}
-	defer res.Body.Close()
+	defer func() {
+		if closeErr := res.Body.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close response body: %w", closeErr)
+		}
+	}()
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return httpResult{}, err
 	}
-	return httpResult{status: res.StatusCode, body: string(data)}, nil
+	return httpResult{status: res.StatusCode, body: string(data)}, err
 }
 
 func assertPlain(client *http.Client, method, url string, status int, body string) error {
@@ -292,12 +305,12 @@ func jsonNamesContain(items any, name string) bool {
 	return false
 }
 
-func asMap(v any) map[string]any {
-	m, _ := v.(map[string]any)
-	if m == nil {
-		return map[string]any{}
+func asMap(v any) (map[string]any, error) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("expected object, got %T", v)
 	}
-	return m
+	return m, nil
 }
 
 func env(name, fallback string) string {

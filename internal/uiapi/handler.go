@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -66,9 +65,8 @@ func (h *handler) apiNotFound(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusNotFound, "not found")
 }
 
-func (h *handler) healthz(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = io.WriteString(w, "ok")
+func (h *handler) healthz(w http.ResponseWriter, r *http.Request) {
+	h.writePlain(w, r, "ok")
 }
 
 func (h *handler) readyz(w http.ResponseWriter, r *http.Request) {
@@ -82,8 +80,7 @@ func (h *handler) readyz(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "kubernetes is not ready")
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = io.WriteString(w, "ok")
+	h.writePlain(w, r, "ok")
 }
 
 func (h *handler) overview(w http.ResponseWriter, r *http.Request) {

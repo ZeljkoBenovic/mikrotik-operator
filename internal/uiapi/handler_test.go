@@ -82,7 +82,7 @@ func TestOverviewCounts(t *testing.T) {
 	}
 	for i, raw := range kinds {
 		item := asMap(t, raw)
-		kind, _ := item["kind"].(string)
+		kind := stringField(t, item, "kind")
 		got := kindCount{
 			Kind:     kind,
 			Count:    intFromJSON(t, item["count"]),
@@ -341,7 +341,7 @@ func TestOwnedPutAndDeleteConflict(t *testing.T) {
 				return
 			}
 			body := decodeMap(t, rec)
-			if !strings.Contains(body["error"].(string), "Service/frontend") {
+			if !strings.Contains(stringField(t, body, "error"), "Service/frontend") {
 				t.Fatalf("error %v", body["error"])
 			}
 			owner := asMap(t, body["managedBy"])
@@ -583,6 +583,24 @@ func asMap(t *testing.T, v any) map[string]any {
 	return m
 }
 
+func stringField(t *testing.T, m map[string]any, key string) string {
+	t.Helper()
+	v, ok := m[key].(string)
+	if !ok {
+		t.Fatalf("%s want string, got %T (%v)", key, m[key], m[key])
+	}
+	return v
+}
+
+func sliceField(t *testing.T, m map[string]any, key string) []any {
+	t.Helper()
+	v, ok := m[key].([]any)
+	if !ok {
+		t.Fatalf("%s want array, got %T (%v)", key, m[key], m[key])
+	}
+	return v
+}
+
 func listItems(t *testing.T, rec *httptest.ResponseRecorder) []map[string]any {
 	t.Helper()
 	raw, ok := decodeMap(t, rec)["items"].([]any)
@@ -605,8 +623,7 @@ func listNameItems(t *testing.T, rec *httptest.ResponseRecorder) []string {
 	names := make([]string, 0, len(raw))
 	for _, item := range raw {
 		m := asMap(t, item)
-		name, _ := m["name"].(string)
-		names = append(names, name)
+		names = append(names, stringField(t, m, "name"))
 	}
 	return names
 }

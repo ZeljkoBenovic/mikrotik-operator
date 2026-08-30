@@ -45,7 +45,9 @@ var kinds = map[string]kindSpec{
 		newObject: func() client.Object { return &api.MikroTikRouter{} },
 		newList:   func() client.ObjectList { return &api.MikroTikRouterList{} },
 		conditionsOf: func(obj client.Object) []metav1.Condition {
-			return obj.(*api.MikroTikRouter).Status.Conditions
+			return objectConditions(obj, func(o *api.MikroTikRouter) []metav1.Condition {
+				return o.Status.Conditions
+			})
 		},
 	},
 	kindDNSRecords: {
@@ -54,7 +56,9 @@ var kinds = map[string]kindSpec{
 		newObject: func() client.Object { return &api.MikroTikDNSRecord{} },
 		newList:   func() client.ObjectList { return &api.MikroTikDNSRecordList{} },
 		conditionsOf: func(obj client.Object) []metav1.Condition {
-			return obj.(*api.MikroTikDNSRecord).Status.Conditions
+			return objectConditions(obj, func(o *api.MikroTikDNSRecord) []metav1.Condition {
+				return o.Status.Conditions
+			})
 		},
 	},
 	kindRoutes: {
@@ -63,7 +67,9 @@ var kinds = map[string]kindSpec{
 		newObject: func() client.Object { return &api.MikroTikRoute{} },
 		newList:   func() client.ObjectList { return &api.MikroTikRouteList{} },
 		conditionsOf: func(obj client.Object) []metav1.Condition {
-			return obj.(*api.MikroTikRoute).Status.Conditions
+			return objectConditions(obj, func(o *api.MikroTikRoute) []metav1.Condition {
+				return o.Status.Conditions
+			})
 		},
 	},
 	kindPortForwards: {
@@ -72,7 +78,9 @@ var kinds = map[string]kindSpec{
 		newObject: func() client.Object { return &api.MikroTikPortForward{} },
 		newList:   func() client.ObjectList { return &api.MikroTikPortForwardList{} },
 		conditionsOf: func(obj client.Object) []metav1.Condition {
-			return obj.(*api.MikroTikPortForward).Status.Conditions
+			return objectConditions(obj, func(o *api.MikroTikPortForward) []metav1.Condition {
+				return o.Status.Conditions
+			})
 		},
 	},
 	kindFirewallRules: {
@@ -81,9 +89,19 @@ var kinds = map[string]kindSpec{
 		newObject: func() client.Object { return &api.MikroTikFirewallRule{} },
 		newList:   func() client.ObjectList { return &api.MikroTikFirewallRuleList{} },
 		conditionsOf: func(obj client.Object) []metav1.Condition {
-			return obj.(*api.MikroTikFirewallRule).Status.Conditions
+			return objectConditions(obj, func(o *api.MikroTikFirewallRule) []metav1.Condition {
+				return o.Status.Conditions
+			})
 		},
 	},
+}
+
+func objectConditions[T client.Object](obj client.Object, conds func(T) []metav1.Condition) []metav1.Condition {
+	typed, ok := obj.(T)
+	if !ok {
+		return nil
+	}
+	return conds(typed)
 }
 
 func lookupKind(plural string) (kindSpec, bool) {
