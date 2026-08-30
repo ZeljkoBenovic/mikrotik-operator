@@ -80,9 +80,10 @@ path and must not require credentials committed to the repository.
 | New or changed controller | `internal/controller`, RBAC, watches, status behavior, unit tests, `docs/how-it-works.md` |
 | RouterOS command or managed comment | `internal/routeros`, RouterOS tests, controller cleanup paths, RouterOS compatibility notes |
 | New CLI flag | `cmd/manager/main.go`, Helm deployment template, raw deployment, values/documentation |
-| Helm value or template | `charts/mikrotik-operator`, README, rendered-resource validation |
+| Helm value or template | `charts/mikrotik-operator`, README, rendered-resource validation, chart version in `Chart.yaml` |
 | Kubernetes watch or permission | controller setup, `config/rbac/role.yaml`, Helm RBAC templates, tests |
-| Release/image behavior | `Dockerfile`, `Makefile`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, README |
+| Release/image behavior | `.goreleaser.yaml`, `Dockerfile`, `Dockerfile.release`, `Dockerfile.ui`, `Dockerfile.ui.release`, `Makefile`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, README |
+| Helm chart publishing | `charts/mikrotik-operator/Chart.yaml`, `.github/workflows/release-chart.yml`, README |
 | Dependency update behavior | `go.mod`, `go.sum`, `Dockerfile`, `.github/workflows`, `.github/dependabot.yml`, CI validation |
 | Contributor workflow | `AGENTS.md`, `CLAUDE.md`, this file, README, `.github/PULL_REQUEST_TEMPLATE.md` |
 
