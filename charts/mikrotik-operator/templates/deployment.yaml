@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mikrotik-operator.fullname" . }}
+  labels:
+    {{- include "mikrotik-operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "mikrotik-operator.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "mikrotik-operator.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "mikrotik-operator.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: manager
+        image: {{ .Values.image.repository }}{{ if .Values.image.digest }}@{{ .Values.image.digest }}{{ else }}:{{ default .Chart.AppVersion .Values.image.tag }}{{ end }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+        - --metrics-bind-address={{ .Values.metrics.bindAddress }}
+        - --health-probe-bind-address={{ .Values.healthProbe.bindAddress }}
+        {{- if .Values.gatewayAPI.enabled }}
+        - --gateway-api-enabled
+        - --gateway-class-name={{ .Values.gatewayAPI.gatewayClass.name }}
+        - --gateway-controller-name={{ .Values.gatewayAPI.gatewayClass.controller }}
+        {{- end }}
+        {{- if .Values.leaderElection.enabled }}
+        - --leader-elect
+        {{- end }}
+        securityContext:
+          {{- toYaml .Values.containerSecurityContext | nindent 10 }}
+        ports:
+        - name: metrics
+          containerPort: {{ int (trimPrefix ":" (last (splitList ":" .Values.metrics.bindAddress))) }}
+          protocol: TCP
+        - name: health
+          containerPort: {{ int (trimPrefix ":" (last (splitList ":" .Values.healthProbe.bindAddress))) }}
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

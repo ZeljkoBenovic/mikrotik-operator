@@ -1,0 +1,14 @@
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikRouter
+metadata:
+  name: edge-routers
+spec:
+  routers:
+  - name: primary
+    address: 10.0.20.254
+    credentialsSecret:
+      name: primary-router-credentials
+  - name: backup
+    address: 10.0.30.254
+    credentialsSecret:
+      name: backup-router-credentials

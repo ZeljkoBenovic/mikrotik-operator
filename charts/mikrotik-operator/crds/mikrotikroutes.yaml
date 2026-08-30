@@ -1,0 +1,83 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mikrotikroutes.mikrotik.operator.io
+spec:
+  group: mikrotik.operator.io
+  names:
+    kind: MikroTikRoute
+    listKind: MikroTikRouteList
+    plural: mikrotikroutes
+    singular: mikrotikroute
+    shortNames:
+    - mtroute
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - name: Destination
+      type: string
+      jsonPath: .spec.destination
+    - name: Gateway
+      type: string
+      jsonPath: .spec.gateway
+    - name: Ready
+      type: string
+      jsonPath: .status.conditions[?(@.type=="Ready")].status
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [destination, gateway]
+            properties:
+              routerRef:
+                type: string
+              destination:
+                type: string
+              gateway:
+                type: string
+              distance:
+                type: integer
+                format: int32
+                minimum: 1
+          status:
+            type: object
+            properties:
+              applied:
+                type: boolean
+              routerRef:
+                type: string
+              conditions:
+                type: array
+                items:
+                  type: object
+                  required: [lastTransitionTime, message, reason, status, type]
+                  properties:
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    message:
+                      type: string
+                    observedGeneration:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                    reason:
+                      type: string
+                      minLength: 1
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    type:
+                      type: string
+                      minLength: 1
+    subresources:
+      status: {}

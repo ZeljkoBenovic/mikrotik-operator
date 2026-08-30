@@ -1,0 +1,43 @@
+{{- if and .Values.ui.enabled .Values.ui.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "mikrotik-operator.ui.fullname" . }}
+  labels:
+    {{- include "mikrotik-operator.ui.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - mikrotik.operator.io
+  resources:
+  - mikrotikrouters
+  - mikrotikdnsrecords
+  - mikrotikportforwards
+  - mikrotikroutes
+  - mikrotikfirewallrules
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs: [list]
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "mikrotik-operator.ui.fullname" . }}
+  labels:
+    {{- include "mikrotik-operator.ui.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "mikrotik-operator.ui.fullname" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "mikrotik-operator.ui.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}

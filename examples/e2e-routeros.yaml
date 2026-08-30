@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e2e-test
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: routeros
+  namespace: e2e-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: routeros
+  template:
+    metadata:
+      labels:
+        app: routeros
+    spec:
+      securityContext:
+        seccompProfile:
+          type: Unconfined
+      containers:
+        - name: routeros
+          image: evilfreelancer/docker-routeros:7.21.5
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          ports:
+            - name: api
+              containerPort: 8728
+              hostPort: 8728
+              protocol: TCP
+            - name: api-ssl
+              containerPort: 8729
+              hostPort: 8729
+              protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: routeros
+  namespace: e2e-test
+spec:
+  selector:
+    app: routeros
+  ports:
+    - name: api
+      port: 8728
+      targetPort: api
+    - name: api-ssl
+      port: 8729
+      targetPort: api-ssl

@@ -1,0 +1,17 @@
+.git
+.idea
+.cache
+.gocache
+.tmp
+.golangci-cache
+.agents
+.codex
+skills
+.github
+bin
+dist
+node_modules
+web/ui/node_modules
+web/ui/dist
+*.tar
+*.tar.gz

@@ -1,0 +1,31 @@
+MikroTik Operator is installed in namespace {{ .Release.Namespace }}.
+
+Check operator pods:
+
+  kubectl --namespace {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+{{- if .Values.ui.enabled }}
+
+The optional admin UI is enabled as Service {{ include "mikrotik-operator.ui.fullname" . }}.
+
+WARNING: The admin UI has no authentication. Do not expose it on an untrusted
+network. Use it only on a trusted network, or place an authenticating proxy in
+front of it.
+
+Port-forward to the UI:
+
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "mikrotik-operator.ui.fullname" . }} {{ .Values.ui.service.port }}:{{ .Values.ui.service.port }}
+
+Then open http://127.0.0.1:{{ .Values.ui.service.port }}
+
+Custom resources generated from a Service, Ingress, or HTTPRoute are read-only
+in the UI. Change those objects on the owning Kubernetes resource instead.
+{{- else }}
+
+The optional admin UI is disabled. Enable it with:
+
+  helm upgrade {{ .Release.Name }} oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator --namespace {{ .Release.Namespace }} --reuse-values --set ui.enabled=true
+
+WARNING: The admin UI has no authentication. Enable it only on a trusted
+network, or behind an authenticating proxy.
+{{- end }}

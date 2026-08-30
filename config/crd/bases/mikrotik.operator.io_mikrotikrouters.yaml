@@ -1,0 +1,142 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mikrotikrouters.mikrotik.operator.io
+spec:
+  group: mikrotik.operator.io
+  names:
+    kind: MikroTikRouter
+    listKind: MikroTikRouterList
+    plural: mikrotikrouters
+    singular: mikrotikrouter
+    shortNames:
+    - mtr
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - name: Address
+      type: string
+      jsonPath: .spec.address
+    - name: Connected
+      type: boolean
+      jsonPath: .status.connected
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            x-kubernetes-validations:
+            - rule: >-
+                (has(self.address) && self.address != '' &&
+                has(self.credentialsSecret) && self.credentialsSecret.name != '') ||
+                (has(self.routers) && self.routers.size() > 0)
+              message: spec must define either a nonempty address and credentialsSecret.name or at least one routers endpoint
+            properties:
+              address:
+                type: string
+                minLength: 1
+              port:
+                type: integer
+                format: int32
+                default: 0
+              tls:
+                type: boolean
+              credentialsSecret:
+                type: object
+                required: [name]
+                properties:
+                  name:
+                    type: string
+                    minLength: 1
+              routeGateway:
+                type: string
+              routers:
+                type: array
+                items:
+                  type: object
+                  required: [name, address, credentialsSecret]
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                    address:
+                      type: string
+                      minLength: 1
+                    port:
+                      type: integer
+                      format: int32
+                    tls:
+                      type: boolean
+                    credentialsSecret:
+                      type: object
+                      required: [name]
+                      properties:
+                        name:
+                          type: string
+                          minLength: 1
+                    routeGateway:
+                      type: string
+          status:
+            type: object
+            properties:
+              connected:
+                type: boolean
+              version:
+                type: string
+              appliedEndpoints:
+                type: array
+                items:
+                  type: object
+                  required: [name, address, credentialsSecret]
+                  properties:
+                    name:
+                      type: string
+                    address:
+                      type: string
+                    port:
+                      type: integer
+                      format: int32
+                    tls:
+                      type: boolean
+                    credentialsSecret:
+                      type: object
+                      required: [name]
+                      properties:
+                        name:
+                          type: string
+                    routeGateway:
+                      type: string
+              conditions:
+                type: array
+                items:
+                  type: object
+                  required: [lastTransitionTime, message, reason, status, type]
+                  properties:
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    message:
+                      type: string
+                    observedGeneration:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                    reason:
+                      type: string
+                      minLength: 1
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    type:
+                      type: string
+                      minLength: 1
+    subresources:
+      status: {}

@@ -1,0 +1,17 @@
+{{- if .Values.service.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mikrotik-operator.fullname" . }}-metrics
+  labels:
+    {{- include "mikrotik-operator.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "mikrotik-operator.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+  - name: metrics
+    port: {{ .Values.service.metrics.port }}
+    targetPort: metrics
+    protocol: TCP
+{{- end }}

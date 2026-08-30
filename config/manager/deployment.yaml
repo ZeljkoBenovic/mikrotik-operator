@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mikrotik-operator
+  namespace: mikrotik-operator-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mikrotik-operator
+  template:
+    metadata:
+      labels:
+        app: mikrotik-operator
+    spec:
+      serviceAccountName: mikrotik-operator
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: manager
+        image: ghcr.io/zeljkobenovic/mikrotik-operator:v0.3.0
+        args:
+        - --leader-elect
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - name: metrics
+          containerPort: 8080
+        - name: health
+          containerPort: 8081
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi

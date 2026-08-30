@@ -1,0 +1,9 @@
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikRouter
+metadata:
+  name: local-router
+  namespace: e2e-test
+spec:
+  address: 10.0.20.254
+  credentialsSecret:
+    name: local-router-credentials

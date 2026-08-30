@@ -1,0 +1,9 @@
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikDNSRecord
+metadata:
+  name: api-internal
+spec:
+  routerRef: home-router
+  name: api.home.arpa
+  address: 10.0.0.20
+  ttl: 1h

@@ -1,0 +1,207 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e2e-test
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: local-router-credentials
+  namespace: e2e-test
+stringData:
+  username: admin
+  password: ""
+---
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikRouter
+metadata:
+  name: local-router
+  namespace: e2e-test
+spec:
+  address: routeros.e2e-test.svc.cluster.local
+  port: 8728
+  credentialsSecret:
+    name: local-router-credentials
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: e2e-test
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          ports:
+            - name: http
+              containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-cluster
+  namespace: e2e-test
+  annotations:
+    mikrotik.operator.io/dns-name: cluster.e2e.home.arpa
+    mikrotik.operator.io/public-ip: 198.51.100.10
+spec:
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: admin
+      port: 9090
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-node
+  namespace: e2e-test
+  annotations:
+    mikrotik.operator.io/dns-name: node.e2e.home.arpa
+    mikrotik.operator.io/public-ip: 198.51.100.11
+spec:
+  type: NodePort
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-ingress
+  namespace: e2e-test
+spec:
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: admin
+      port: 9090
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-ingress
+  namespace: e2e-test
+  annotations:
+    mikrotik.operator.io/public-ip: 198.51.100.12
+spec:
+  ingressClassName: mikrotik
+  rules:
+    - host: ingress.e2e.home.arpa
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web-ingress
+                port:
+                  number: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: mikrotik
+spec:
+  controllerName: mikrotik.operator.io/controller
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: mikrotik
+  namespace: e2e-test
+spec:
+  gatewayClassName: mikrotik
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: gateway.e2e.home.arpa
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web-gateway
+  namespace: e2e-test
+  annotations:
+    mikrotik.operator.io/public-ip: 198.51.100.13
+spec:
+  parentRefs:
+    - name: mikrotik
+  hostnames:
+    - gateway.e2e.home.arpa
+  rules:
+    - backendRefs:
+        - name: web-ingress
+          port: 80
+---
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikDNSRecord
+metadata:
+  name: manual-dns
+  namespace: e2e-test
+spec:
+  routerRef: local-router
+  name: manual.e2e.home.arpa
+  address: 10.99.0.10
+---
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikRoute
+metadata:
+  name: manual-route
+  namespace: e2e-test
+spec:
+  routerRef: local-router
+  destination: 10.99.0.11/32
+  gateway: 10.0.0.1
+---
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikPortForward
+metadata:
+  name: manual-port-forward
+  namespace: e2e-test
+  annotations:
+    mikrotik.operator.io/public-ip: 198.51.100.14
+spec:
+  routerRef: local-router
+  protocol: tcp
+  externalPort: 8443
+  targetAddress: 10.99.0.12
+  targetPort: 443
+---
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikFirewallRule
+metadata:
+  name: manual-firewall
+  namespace: e2e-test
+spec:
+  routerRef: local-router
+  chain: forward
+  action: accept
+  protocol: tcp
+  destinationAddress: 10.99.0.12
+  destinationPort: "443"
+  placeBefore: true

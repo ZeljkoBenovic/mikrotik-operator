@@ -1,0 +1,33 @@
+name: Copilot setup steps
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    name: Prepare Go and Helm tooling
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: true
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Build operator
+        run: go build -trimpath ./cmd/manager
+
+      - name: Validate Helm chart
+        run: helm lint charts/mikrotik-operator

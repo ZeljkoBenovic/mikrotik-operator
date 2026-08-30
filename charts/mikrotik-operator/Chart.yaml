@@ -1,0 +1,14 @@
+apiVersion: v2
+name: mikrotik-operator
+description: Kubernetes operator for managing MikroTik RouterOS configuration
+type: application
+version: 0.3.1
+appVersion: v0.3.0
+keywords:
+- kubernetes
+- operator
+- mikrotik
+- routeros
+home: https://github.com/ZeljkoBenovic/mikrotik-operator
+sources:
+- https://github.com/ZeljkoBenovic/mikrotik-operator

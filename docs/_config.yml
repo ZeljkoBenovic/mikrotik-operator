@@ -1,0 +1,8 @@
+title: MikroTik Kubernetes Operator
+description: Manage MikroTik RouterOS configuration from Kubernetes.
+url: https://zeljkobenovic.github.io
+baseurl: /mikrotik-operator
+theme: jekyll-theme-cayman
+markdown: kramdown
+plugins:
+  - jekyll-seo-tag
