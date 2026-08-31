@@ -204,8 +204,8 @@ func TestClusterRouteAppliesToEndpoint(t *testing.T) {
 		name     string
 		router   api.MikroTikRouter
 		gateway  string
+		origin   string
 		endpoint int
-		nodeIPs  []string
 		want     bool
 	}{
 		{
@@ -215,6 +215,7 @@ func TestClusterRouteAppliesToEndpoint(t *testing.T) {
 				{Name: "b", Address: "192.0.2.2", RouteGateway: "10.1.1.2"},
 			}}},
 			gateway:  "10.1.1.1",
+			origin:   clusterRouteOriginOverride,
 			endpoint: 0,
 			want:     true,
 		},
@@ -225,36 +226,37 @@ func TestClusterRouteAppliesToEndpoint(t *testing.T) {
 				{Name: "b", Address: "192.0.2.2", RouteGateway: "10.1.1.2"},
 			}}},
 			gateway:  "10.1.1.2",
+			origin:   clusterRouteOriginOverride,
 			endpoint: 0,
 			want:     false,
 		},
 		{
-			name: "unconfigured endpoint keeps node IP even when it matches a peer routeGateway",
+			name: "unconfigured endpoint keeps a hop that is both node IP and peer routeGateway",
 			router: api.MikroTikRouter{Spec: api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{
 				{Name: "a", Address: "192.0.2.1", RouteGateway: "192.0.2.10"},
 				{Name: "b", Address: "192.0.2.2"},
 			}}},
 			gateway:  "192.0.2.10",
+			origin:   clusterRouteOriginBoth,
 			endpoint: 1,
-			nodeIPs:  []string{"192.0.2.10"},
 			want:     true,
 		},
 		{
-			name: "unconfigured endpoint rejects peer routeGateway that is not a node IP",
+			name: "unconfigured endpoint rejects peer routeGateway that is not a selected node hop",
 			router: api.MikroTikRouter{Spec: api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{
-				{Name: "a", Address: "192.0.2.1", RouteGateway: "10.1.1.1"},
+				{Name: "a", Address: "192.0.2.1", RouteGateway: "192.0.2.11"},
 				{Name: "b", Address: "192.0.2.2"},
 			}}},
-			gateway:  "10.1.1.1",
+			gateway:  "192.0.2.11",
+			origin:   clusterRouteOriginOverride,
 			endpoint: 1,
-			nodeIPs:  []string{"192.0.2.10"},
 			want:     false,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			endpoint := test.router.Spec.Routers[test.endpoint]
-			if got := clusterRouteAppliesToEndpoint(test.gateway, endpoint, test.router, test.nodeIPs); got != test.want {
+			if got := clusterRouteAppliesToEndpoint(test.gateway, test.origin, endpoint, test.router); got != test.want {
 				t.Fatalf("got %v, want %v", got, test.want)
 			}
 		})
@@ -286,8 +288,8 @@ func TestRouteReconcilerAppliesGeneratedClusterRoutesPerEndpoint(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "app"},
 		Data:       map[string][]byte{"username": []byte("admin"), "password": []byte("x")},
 	}
-	routeA := generatedClusterRoute("rt-a", "10.1.1.1")
-	routeB := generatedClusterRoute("rt-b", "10.1.1.2")
+	routeA := generatedClusterRoute("rt-a", "10.1.1.1", clusterRouteOriginOverride)
+	routeB := generatedClusterRoute("rt-b", "10.1.1.2", clusterRouteOriginOverride)
 	clients := map[string]*recordingRouterClient{
 		"192.0.2.1": {},
 		"192.0.2.2": {},
@@ -345,7 +347,7 @@ func TestRouteReconcilerKeepsNodeIPOnUnconfiguredEndpointWhenPeerUsesSameGateway
 		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
 		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
 	}
-	route := generatedClusterRoute("rt-shared", "192.0.2.10")
+	route := generatedClusterRoute("rt-shared", "192.0.2.10", clusterRouteOriginBoth)
 	clients := map[string]*recordingRouterClient{
 		"192.0.2.1": {},
 		"192.0.2.2": {},
@@ -373,13 +375,108 @@ func TestRouteReconcilerKeepsNodeIPOnUnconfiguredEndpointWhenPeerUsesSameGateway
 	}
 }
 
-func generatedClusterRoute(name, gateway string) api.MikroTikRoute {
+func TestRouteReconcilerSkipsPeerNodeIPOverrideOnUnconfiguredEndpoint(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoints := []api.RouterEndpoint{
+		{
+			Name:              "a",
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+			RouteGateway:      "192.0.2.11",
+		},
+		{
+			Name:              "b",
+			Address:           "192.0.2.2",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "core", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: endpoints},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: endpoints},
+	}
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "app"},
+		Data:       map[string][]byte{"username": []byte("admin"), "password": []byte("x")},
+	}
+	route := generatedClusterRoute("rt-override", "192.0.2.11", clusterRouteOriginOverride)
+	clients := map[string]*recordingRouterClient{
+		"192.0.2.1": {},
+		"192.0.2.2": {},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&router, &secret, &route).
+		WithStatusSubresource(&router, &route).Build()
+	reconciler := RouteReconciler{
+		Client: kube,
+		Factory: func(_ context.Context, address string, _ int32, _ bool, _, _ string) (ros.Client, error) {
+			client, ok := clients[address]
+			if !ok {
+				t.Fatalf("unexpected router address %s", address)
+			}
+			return client, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", route.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if !stringSetEqual(clients["192.0.2.1"].ensuredRouteGateways, []string{"192.0.2.11"}) {
+		t.Fatalf("configured endpoint gateways %#v, want [192.0.2.11]", clients["192.0.2.1"].ensuredRouteGateways)
+	}
+	if len(clients["192.0.2.2"].ensuredRouteGateways) != 0 {
+		t.Fatalf("unconfigured endpoint installed override %#v", clients["192.0.2.2"].ensuredRouteGateways)
+	}
+}
+
+func TestClusterRouteHopsMarksOverrideVersusSingleNodeOrigin(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	backend := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app", Annotations: map[string]string{api.RouteModeAnnotation: "single-node"}},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "core", Namespace: "edge"},
+		Spec: api.MikroTikRouterSpec{
+			Routers: []api.RouterEndpoint{
+				{Name: "a", Address: "192.0.2.1", CredentialsSecret: corev1.LocalObjectReference{Name: "creds"}, RouteGateway: "192.0.2.11"},
+				{Name: "b", Address: "192.0.2.2", CredentialsSecret: corev1.LocalObjectReference{Name: "creds"}},
+			},
+		},
+	}
+	nodeA := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	nodeB := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-b"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.11"}}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&backend, &router, &nodeA, &nodeB).Build()
+	hops, err := clusterRouteHops(context.Background(), kube, backend, "edge", "core")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, hop := range hops {
+		got[hop.gateway] = hop.origin
+	}
+	if got["192.0.2.11"] != clusterRouteOriginOverride {
+		t.Fatalf("peer node IP origin %q, want override", got["192.0.2.11"])
+	}
+	if got["192.0.2.10"] != clusterRouteOriginNodes {
+		t.Fatalf("single-node origin %q, want nodes", got["192.0.2.10"])
+	}
+}
+
+func generatedClusterRoute(name, gateway, origin string) api.MikroTikRoute {
 	return api.MikroTikRoute{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       name,
 			Namespace:  "app",
 			Finalizers: []string{resourceFinalizer},
-			Labels:     map[string]string{clusterRouteSourceLabel: "src"},
+			Labels: map[string]string{
+				clusterRouteSourceLabel: "src",
+				clusterRouteOriginLabel: origin,
+			},
 			Annotations: map[string]string{
 				durableRouterTargetsAnnotation: "core",
 			},

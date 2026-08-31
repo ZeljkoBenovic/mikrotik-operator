@@ -15,6 +15,10 @@ import (
 )
 
 const clusterRouteSourceLabel = "mikrotik.operator.io/route-source"
+const clusterRouteOriginLabel = "mikrotik.operator.io/cluster-route-origin"
+const clusterRouteOriginOverride = "override"
+const clusterRouteOriginNodes = "nodes"
+const clusterRouteOriginBoth = "both"
 
 type clusterRouteReconcileRequest struct {
 	kube       client.Client
@@ -30,6 +34,12 @@ type clusterRouteCandidate struct {
 	name        string
 	destination string
 	gateway     string
+	origin      string
+}
+
+type clusterRouteHop struct {
+	gateway string
+	origin  string
 }
 
 func reconcileOwnedClusterRoutes(ctx context.Context, request clusterRouteReconcileRequest) error {
@@ -52,7 +62,10 @@ func reconcileOwnedClusterRoutes(ctx context.Context, request clusterRouteReconc
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      candidate.name,
 					Namespace: request.namespace,
-					Labels:    map[string]string{clusterRouteSourceLabel: labelValue},
+					Labels: map[string]string{
+						clusterRouteSourceLabel: labelValue,
+						clusterRouteOriginLabel: candidate.origin,
+					},
 				},
 			}
 			if err := controllerutil.SetControllerReference(request.owner, &route, request.scheme); err != nil {
@@ -83,9 +96,15 @@ func reconcileOwnedClusterRoutes(ctx context.Context, request clusterRouteReconc
 		}
 		if route.Spec.RouterRef == request.routerRef &&
 			route.Spec.Destination == candidate.destination &&
-			route.Spec.Gateway == candidate.gateway {
+			route.Spec.Gateway == candidate.gateway &&
+			route.Labels[clusterRouteOriginLabel] == candidate.origin {
 			continue
 		}
+		if route.Labels == nil {
+			route.Labels = map[string]string{}
+		}
+		route.Labels[clusterRouteSourceLabel] = labelValue
+		route.Labels[clusterRouteOriginLabel] = candidate.origin
 		route.Spec.RouterRef = request.routerRef
 		route.Spec.Destination = candidate.destination
 		route.Spec.Gateway = candidate.gateway
@@ -115,14 +134,14 @@ func desiredClusterRouteCandidates(ctx context.Context, request clusterRouteReco
 		if service.Spec.ClusterIP == "" || service.Spec.ClusterIP == corev1.ClusterIPNone {
 			continue
 		}
-		gateways, err := clusterRouteGateways(ctx, request.kube, service, request.namespace, request.routerRef)
+		gateways, err := clusterRouteHops(ctx, request.kube, service, request.namespace, request.routerRef)
 		if err != nil {
 			return nil, err
 		}
 		destination := service.Spec.ClusterIP + "/32"
-		for _, gateway := range gateways {
+		for _, hop := range gateways {
 			name := "rt-" + shortHash(
-				request.namespace+"/"+request.sourceName+"/"+service.Namespace+"/"+service.Name+"/"+destination+"/"+gateway,
+				request.namespace+"/"+request.sourceName+"/"+service.Namespace+"/"+service.Name+"/"+destination+"/"+hop.gateway,
 			)
 			if _, exists := seen[name]; exists {
 				continue
@@ -131,7 +150,8 @@ func desiredClusterRouteCandidates(ctx context.Context, request clusterRouteReco
 			candidates = append(candidates, clusterRouteCandidate{
 				name:        name,
 				destination: destination,
-				gateway:     gateway,
+				gateway:     hop.gateway,
+				origin:      hop.origin,
 			})
 		}
 	}
@@ -145,8 +165,30 @@ func clusterRouteGateways(
 	ownerNamespace string,
 	routerRef string,
 ) ([]string, error) {
+	hops, err := clusterRouteHops(ctx, kube, service, ownerNamespace, routerRef)
+	if err != nil {
+		return nil, err
+	}
+	gateways := make([]string, 0, len(hops))
+	for _, hop := range hops {
+		gateways = append(gateways, hop.gateway)
+	}
+	return gateways, nil
+}
+
+func clusterRouteHops(
+	ctx context.Context,
+	kube client.Client,
+	service corev1.Service,
+	ownerNamespace string,
+	routerRef string,
+) ([]clusterRouteHop, error) {
 	if routerRef == "" {
-		return routeGateways(ctx, kube, service)
+		nodes, err := routeGateways(ctx, kube, service)
+		if err != nil {
+			return nil, err
+		}
+		return hopsWithOrigin(nodes, clusterRouteOriginNodes), nil
 	}
 	key := routerKeyFromRef(ownerNamespace, routerRef)
 	var router api.MikroTikRouter
@@ -156,27 +198,28 @@ func clusterRouteGateways(
 		}
 		return nil, err
 	}
-	return desiredClusterRouteGateways(ctx, kube, service, router)
+	return desiredClusterRouteHops(ctx, kube, service, router)
 }
 
-func desiredClusterRouteGateways(
+func desiredClusterRouteHops(
 	ctx context.Context,
 	kube client.Client,
 	service corev1.Service,
 	router api.MikroTikRouter,
-) ([]string, error) {
-	gateways := make([]string, 0)
-	seen := make(map[string]struct{})
-	add := func(values ...string) {
+) ([]clusterRouteHop, error) {
+	hops := make([]clusterRouteHop, 0)
+	seen := make(map[string]string)
+	add := func(values []string, origin string) {
 		for _, value := range values {
 			if value == "" {
 				continue
 			}
-			if _, exists := seen[value]; exists {
+			if existing, exists := seen[value]; exists {
+				seen[value] = mergeClusterRouteOrigin(existing, origin)
 				continue
 			}
-			seen[value] = struct{}{}
-			gateways = append(gateways, value)
+			seen[value] = origin
+			hops = append(hops, clusterRouteHop{gateway: value, origin: origin})
 		}
 	}
 	var nodeIPs []string
@@ -191,19 +234,41 @@ func desiredClusterRouteGateways(
 	}
 	for _, endpoint := range routerEndpoints(router) {
 		if want := endpointRouteGateway(endpoint, router); want != "" {
-			add(want)
+			add([]string{want}, clusterRouteOriginOverride)
 			continue
 		}
 		nodes, err := loadNodes()
 		if err != nil {
 			return nil, err
 		}
-		add(nodes...)
+		add(nodes, clusterRouteOriginNodes)
 	}
-	if len(gateways) == 0 {
-		return loadNodes()
+	if len(hops) == 0 {
+		nodes, err := loadNodes()
+		if err != nil {
+			return nil, err
+		}
+		add(nodes, clusterRouteOriginNodes)
 	}
-	return gateways, nil
+	for index := range hops {
+		hops[index].origin = seen[hops[index].gateway]
+	}
+	return hops, nil
+}
+
+func hopsWithOrigin(gateways []string, origin string) []clusterRouteHop {
+	hops := make([]clusterRouteHop, 0, len(gateways))
+	for _, gateway := range gateways {
+		hops = append(hops, clusterRouteHop{gateway: gateway, origin: origin})
+	}
+	return hops
+}
+
+func mergeClusterRouteOrigin(existing, added string) string {
+	if existing == "" || existing == added {
+		return added
+	}
+	return clusterRouteOriginBoth
 }
 
 func endpointRouteGateway(endpoint api.RouterEndpoint, router api.MikroTikRouter) string {
@@ -213,40 +278,12 @@ func endpointRouteGateway(endpoint api.RouterEndpoint, router api.MikroTikRouter
 	return router.Spec.RouteGateway
 }
 
-func clusterRouteAppliesToEndpoint(gateway string, endpoint api.RouterEndpoint, router api.MikroTikRouter, nodeIPs []string) bool {
+func clusterRouteAppliesToEndpoint(gateway, origin string, endpoint api.RouterEndpoint, router api.MikroTikRouter) bool {
 	want := endpointRouteGateway(endpoint, router)
 	if want != "" {
 		return gateway == want
 	}
-	for _, ip := range nodeIPs {
-		if ip == gateway {
-			return true
-		}
-	}
-	return false
-}
-
-func listNodeInternalIPs(ctx context.Context, kube client.Client) ([]string, error) {
-	var nodes corev1.NodeList
-	if err := kube.List(ctx, &nodes); err != nil {
-		return nil, err
-	}
-	ips := make([]string, 0, len(nodes.Items))
-	seen := make(map[string]struct{}, len(nodes.Items))
-	for _, node := range nodes.Items {
-		for _, address := range node.Status.Addresses {
-			if address.Type != corev1.NodeInternalIP || address.Address == "" {
-				continue
-			}
-			if _, exists := seen[address.Address]; exists {
-				break
-			}
-			seen[address.Address] = struct{}{}
-			ips = append(ips, address.Address)
-			break
-		}
-	}
-	return ips, nil
+	return origin == clusterRouteOriginNodes || origin == clusterRouteOriginBoth
 }
 
 func clusterRouteSourceValue(namespace, sourceName string) string {
