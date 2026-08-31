@@ -41,7 +41,7 @@ export function AppLayout() {
   }
 
   return (
-    <Layout style={{ minHeight: '100%' }}>
+    <Layout style={{ minHeight: '100dvh' }}>
       <Layout.Sider width={232} breakpoint="lg" collapsedWidth={72}>
         <div className="app-sider-brand">
           <div className="app-sider-mark">MK</div>

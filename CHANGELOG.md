@@ -7,6 +7,11 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Admin UI shell fills the viewport height, and owned-resource labels
+  ellipsize instead of overlapping row actions.
+
 ## [0.2.0] - 2026-08-31
 
 ### Added
