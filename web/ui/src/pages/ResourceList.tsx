@@ -125,24 +125,32 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
         loading={list.isLoading}
         dataSource={filtered}
         pagination={{ pageSize: 20, showSizeChanger: true }}
+        tableLayout="fixed"
         columns={[
           {
             title: 'Name',
+            ellipsis: true,
             render: (_, row) => (
               <Link to={`${kind.path}/${displayNamespace(row)}/${row.metadata.name}`}>{row.metadata.name}</Link>
             ),
           },
-          { title: 'Namespace', render: (_, row) => displayNamespace(row), width: 160 },
+          { title: 'Namespace', ellipsis: true, render: (_, row) => displayNamespace(row), width: 140 },
           {
             title: 'Summary',
             ellipsis: true,
             render: (_, row) => specSummary(kind.apiKind, row.spec ?? {}),
           },
-          { title: 'Ready', width: 120, render: (_, row) => <ReadyBadge resource={row} /> },
-          { title: 'Ownership', width: 260, render: (_, row) => <ManagedBadge resource={row} /> },
+          { title: 'Ready', width: 110, render: (_, row) => <ReadyBadge resource={row} /> },
+          {
+            title: 'Ownership',
+            width: 200,
+            ellipsis: true,
+            className: 'ownership-cell',
+            render: (_, row) => <ManagedBadge resource={row} />,
+          },
           {
             title: 'Actions',
-            width: 120,
+            width: 108,
             render: (_, row) => {
               const owned = isManaged(row)
               return (
