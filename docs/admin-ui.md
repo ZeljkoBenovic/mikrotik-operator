@@ -82,3 +82,23 @@ create yourself remain fully editable.
 
 See [Expose a Service, Ingress, or HTTPRoute](how-to-expose-services.md) for
 the annotation workflow.
+
+## Local UI development
+
+From the repository root, run the Go backend against your kubeconfig, then
+the Vite dev server. Vite proxies `/api` to `http://127.0.0.1:8080`.
+
+```sh
+go run ./cmd/ui-backend -bind-address=:8080
+cd web/ui && npm ci && npm run dev
+```
+
+Open `http://127.0.0.1:5173`. See [`web/ui/README.md`](https://github.com/ZeljkoBenovic/mikrotik-operator/blob/main/web/ui/README.md)
+for scripts and routes. `make e2e-ui-test` starts k3d, installs the chart
+with the UI enabled, and exercises create/update/delete over HTTP. It does
+not start RouterOS.
+
+The backend allowlists five kinds (`mikrotikrouters`, `mikrotikdnsrecords`,
+`mikrotikroutes`, `mikrotikportforwards`, `mikrotikfirewallrules`). Secret
+list endpoints return names only. Update and delete of owned objects return
+HTTP 409 with a `managedBy` body.

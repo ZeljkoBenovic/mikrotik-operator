@@ -49,7 +49,9 @@ kubectl create secret generic mikrotik-credentials \
   --from-literal=password='replace-me'
 ```
 
-The Secret must contain the keys `username` and `password`.
+The Secret must contain the keys `username` and `password`, and it must be in
+the same namespace as the `MikroTikRouter`. Workloads in other namespaces can
+reference that router; they do not need a copy of the Secret.
 
 ## Install the chart
 
@@ -87,11 +89,21 @@ kubectl apply -f router.yaml
 kubectl -n mikrotik-system get mikrotikrouter home-router
 ```
 
-The `routerRef` field is optional on managed resources when exactly one live
-router exists in their namespace, or when exactly one live router exists in
-the cluster. If multiple routers exist, set `routerRef` to the router name
-or to `namespace/name`. A router definition can also contain multiple
-endpoints; all configured endpoints receive the managed configuration.
+The `routerRef` field is optional on managed resources when exactly one
+non-deleting router exists in their namespace, or when that namespace has none
+and exactly one non-deleting router exists in the cluster. "Live" here means
+the object is not deleting; a disconnected router still counts. If more than
+one router exists, set `routerRef` (or the `mikrotik.operator.io/router-ref`
+annotation) to the router name or to `namespace/name`.
+
+A router definition can also contain multiple endpoints under `spec.routers`;
+all configured endpoints receive the managed configuration. Optional
+`spec.routeGateway` overrides node InternalIP gateways on generated ClusterIP
+routes.
+
+Omitted `spec.port` is `8728`, or `8729` when `spec.tls` is true. TLS
+connections verify certificates with the Go defaults, so a self-signed
+RouterOS API certificate will not connect until the cluster trusts that CA.
 
 ## Verify installation
 
@@ -100,10 +112,12 @@ kubectl -n mikrotik-operator-system get pods
 kubectl -n mikrotik-system get mikrotikrouters
 ```
 
-Check the resource conditions and operator logs if the router is not connected:
+Check the resource `Ready` condition and operator logs if the router is not
+connected. See [Troubleshooting](troubleshooting.md) for TLS, Secret
+namespace, and ambiguous-router failures.
 
 ```sh
-kubectl -n mikrotik-operator-system logs deploy/mikrotik-operator
+kubectl -n mikrotik-operator-system logs -l app.kubernetes.io/name=mikrotik-operator
 ```
 
 ## Optional admin UI
@@ -131,3 +145,22 @@ helm upgrade --install mikrotik-operator \
 
 See [Admin UI](admin-ui.md) for port-forward instructions and the read-only
 rule for resources generated from a Service, Ingress, or HTTPRoute.
+
+## Chart and image versions
+
+Helm chart package versions and operator image tags are independent. Chart
+`0.1.1` sets `appVersion` to `v0.1.1`, which is the image tag when
+`image.tag` is empty. Pin both when they must not drift:
+
+```sh
+helm upgrade --install mikrotik-operator \
+  oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator \
+  --version 0.1.1 \
+  --namespace mikrotik-operator-system \
+  --create-namespace \
+  --set image.tag=v0.1.1
+```
+
+Images are published from trusted `vMAJOR.MINOR.PATCH` git tags. Chart
+packages are published from `main` when `charts/mikrotik-operator/Chart.yaml`
+`version` changes. Re-pushing an existing chart version is skipped.

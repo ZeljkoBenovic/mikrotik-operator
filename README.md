@@ -12,7 +12,8 @@ RouterOS v6 and v7 and is designed for local Kubernetes clusters, such as k3s,
 where a MikroTik router is the network gateway.
 
 Read the [public documentation](https://zeljkobenovic.github.io/mikrotik-operator/)
-for installation, usage guides, reference, and architecture details.
+for installation, usage, reference, architecture, and
+[troubleshooting](docs/troubleshooting.md).
 
 It creates DNS records, routes, NAT port forwards, and firewall rules while
 only managing configuration entries that it owns. Existing RouterOS rules are
@@ -50,9 +51,12 @@ The core resources are namespaced:
 | `MikroTikPortForward` | `dst-nat`, `src-nat`, and forward firewall rules |
 | `MikroTikFirewallRule` | Custom `/ip firewall filter` entry |
 
-`routerRef` is optional when exactly one `MikroTikRouter` exists in the
-resource namespace, or when exactly one live router exists in the cluster.
-Set `routerRef` to `name` or `namespace/name` when more than one router exists.
+`routerRef` is optional when exactly one non-deleting `MikroTikRouter` exists
+in the resource namespace, or when that namespace has none and exactly one
+non-deleting router exists in the cluster. Set `routerRef` to `name` or
+`namespace/name` when more than one router exists. Credentials stay in the
+router namespace. TLS API connections verify certificates with the Go
+defaults.
 
 ## Quick start
 
@@ -230,15 +234,20 @@ helm template validation charts/mikrotik-operator --include-crds
 cd web/ui && npm ci && npm run build
 ```
 
+`make e2e-ui-test` installs the chart with the UI enabled on k3d and CRUDs
+each CR over HTTP; it does not start RouterOS. Keep CRD YAML identical in
+`config/crd/bases` and `charts/mikrotik-operator/crds`.
+
 GitHub Actions validates formatting, tests, race tests, vet, vulnerability
 scanning, Go linting, Docker builds, Helm resources, Kubernetes manifests,
 workflow syntax, and the GoReleaser configuration. Trusted `vMAJOR.MINOR.PATCH`
 tags publish multi-arch operator and admin UI images with GoReleaser. Helm
 chart packages are published from `main` when `charts/mikrotik-operator/Chart.yaml`
-gets a new version, independent of image tags. GitHub Releases contain
-changelog notes only; the operator is consumed as a container, not as a
-standalone binary. Dependabot opens grouped weekly updates for Go modules,
-GitHub Actions, and pinned container images.
+gets a new version, independent of image tags. Re-publishing an existing
+chart version is skipped. GitHub Releases contain changelog notes only; the
+operator is consumed as a container, not as a standalone binary. Dependabot
+opens grouped weekly updates for Go modules, GitHub Actions, and pinned
+container images.
 
 ## Contributing
 
@@ -249,7 +258,8 @@ opening a pull request. Use the repository issue forms for bug reports and
 feature requests.
 
 The operator architecture is documented in
-[`docs/how-it-works.md`](docs/how-it-works.md).
+[`docs/how-it-works.md`](docs/how-it-works.md). Operational failures and
+common pitfalls are in [`docs/troubleshooting.md`](docs/troubleshooting.md).
 
 Use a dedicated RouterOS account with only the API policies required by the
 deployment, and keep RouterOS reachable from the operator Pod over TCP 8728
