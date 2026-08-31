@@ -14,6 +14,7 @@ export function sanitizeKubernetesName(raw: string, options: SanitizeNameOptions
   let value = raw.toLowerCase().replace(/[^a-z0-9.-]+/g, '-')
   value = value.replace(/-{2,}/g, '-').replace(/\.{2,}/g, '.')
   value = value.replace(/-+\./g, '.').replace(/\.-+/g, '.')
+  value = value.replace(/\.{2,}/g, '.')
   value = value.replace(/^[-.]+/, '')
   if (finalize) {
     value = value.replace(/[-.]+$/, '')

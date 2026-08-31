@@ -17,6 +17,9 @@ describe('sanitizeKubernetesName', () => {
   it('collapses repeated separators and strips a leading hyphen', () => {
     expect(sanitizeKubernetesName('--Foo---Bar--')).toBe('foo-bar-')
     expect(sanitizeKubernetesName('foo-.bar')).toBe('foo.bar')
+    expect(sanitizeKubernetesName('a.-.b')).toBe('a.b')
+    expect(sanitizeKubernetesName('a-.-b')).toBe('a.b')
+    expect(isKubernetesName(sanitizeKubernetesName('a.-.b'))).toBe(true)
   })
 
   it('keeps a trailing hyphen while typing and strips it on finalize', () => {
