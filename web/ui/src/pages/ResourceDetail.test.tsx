@@ -1,4 +1,5 @@
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ResourceDetail } from './ResourceDetail'
 import { jsonResponse, renderWithProviders } from '../test/render'
@@ -66,5 +67,52 @@ describe('ResourceDetail', () => {
       { timeout: 5000 },
     )
     expect(document.querySelector('.ant-badge-status-success')).toBeTruthy()
+  })
+
+  it('keeps in-progress edits while status polling updates the resource', async () => {
+    let served = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/api/resources/mikrotikportforwards/app/web')) {
+          served += 1
+          return jsonResponse(
+            portForward({
+              metadata: { name: 'web', namespace: 'app', resourceVersion: String(served) },
+              status: {
+                applied: false,
+                conditions: [
+                  { type: 'Ready', status: 'False', reason: 'Pending', message: `attempt-${served}` },
+                ],
+              },
+            }),
+          )
+        }
+        if (url === '/api/config') {
+          return jsonResponse({ namespace: 'mikrotik-operator-system' })
+        }
+        return jsonResponse({ items: [] })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<ResourceDetail kind={portForwardKind} />, {
+      route: '/port-forwards/app/web',
+      path: '/port-forwards/:namespace/:name',
+    })
+    expect(await screen.findByText('NotReady')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /edit/i }))
+    const targetAddress = await screen.findByLabelText(/^target address$/i)
+    expect(targetAddress).toHaveValue('10.0.20.100')
+    fireEvent.change(targetAddress, { target: { value: '10.0.99.99' } })
+    expect(targetAddress).toHaveValue('10.0.99.99')
+    const servedAfterEdit = served
+    await waitFor(
+      () => {
+        expect(served).toBeGreaterThan(servedAfterEdit)
+      },
+      { timeout: 5000 },
+    )
+    expect(screen.getByLabelText(/^target address$/i)).toHaveValue('10.0.99.99')
   })
 })

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, queryKeys } from '../api/client'
+import type { ResourceObject } from '../api/types'
 import { ConditionsTable } from '../components/ConditionsTable'
 import { ManagedBanner } from '../components/ManagedBanner'
 import { ReadyBadge } from '../components/ReadyBadge'
@@ -23,7 +24,7 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
   const params = useParams()
   const namespace = params.namespace ?? 'default'
   const name = params.name ?? ''
-  const [editing, setEditing] = useState(false)
+  const [editResource, setEditResource] = useState<ResourceObject>()
 
   const query = useQuery({
     queryKey: queryKeys.resource(kind.slug, namespace, name),
@@ -88,7 +89,7 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
           </Space>
         </div>
         <Space>
-          <Button icon={<EditOutlined />} disabled={!resource || owned} onClick={() => setEditing(true)}>
+          <Button icon={<EditOutlined />} disabled={!resource || owned} onClick={() => setEditResource(resource)}>
             Edit
           </Button>
           <Button danger icon={<DeleteOutlined />} disabled={!resource || owned} onClick={confirmDelete}>
@@ -142,10 +143,10 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
       ) : null}
       <ResourceDrawer
         kind={kind}
-        open={editing}
+        open={Boolean(editResource)}
         mode="edit"
-        resource={resource}
-        onClose={() => setEditing(false)}
+        resource={editResource}
+        onClose={() => setEditResource(undefined)}
       />
     </>
   )
