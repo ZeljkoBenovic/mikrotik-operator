@@ -1,8 +1,8 @@
-import { screen } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ResourceDetail } from './ResourceDetail'
 import { jsonResponse, renderWithProviders } from '../test/render'
-import { dnsKind, ownedDNS } from '../test/fixtures'
+import { dnsKind, ownedDNS, portForward, portForwardKind } from '../test/fixtures'
 
 describe('ResourceDetail', () => {
   it('locks owned resources and shows the managed banner', async () => {
@@ -26,5 +26,42 @@ describe('ResourceDetail', () => {
     expect(await screen.findByText('Managed by Service/app/frontend')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /edit/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /delete/i })).toBeDisabled()
+  })
+
+  it('refreshes Ready status without a page reload', async () => {
+    let served = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/api/resources/mikrotikportforwards/app/web')) {
+          served += 1
+          if (served === 1) {
+            return jsonResponse(portForward())
+          }
+          return jsonResponse(
+            portForward({
+              status: {
+                applied: true,
+                conditions: [{ type: 'Ready', status: 'True', reason: 'Applied' }],
+              },
+            }),
+          )
+        }
+        return jsonResponse({})
+      }),
+    )
+    renderWithProviders(<ResourceDetail kind={portForwardKind} />, {
+      route: '/port-forwards/app/web',
+      path: '/port-forwards/:namespace/:name',
+    })
+    expect(await screen.findByText('NotReady')).toBeInTheDocument()
+    await waitFor(
+      () => {
+        expect(screen.queryByText('NotReady')).not.toBeInTheDocument()
+      },
+      { timeout: 5000 },
+    )
+    expect(document.querySelector('.ant-badge-status-success')).toBeTruthy()
   })
 })

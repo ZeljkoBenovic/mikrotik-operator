@@ -3,6 +3,7 @@ import { KINDS } from '../kinds'
 
 export const routerKind = KINDS[0]
 export const dnsKind = KINDS[1]
+export const portForwardKind = KINDS[3]
 
 export function standaloneRouter(overrides: Partial<ResourceObject> = {}): ResourceObject {
   return {
@@ -51,5 +52,25 @@ export function notReadyRoute(): ResourceObject {
       applied: false,
       conditions: [{ type: 'Ready', status: 'False', reason: 'Pending', message: 'waiting' }],
     },
+  }
+}
+
+export function portForward(overrides: Partial<ResourceObject> = {}): ResourceObject {
+  return {
+    apiVersion: 'mikrotik.operator.io/v1alpha1',
+    kind: 'MikroTikPortForward',
+    metadata: { name: 'web', namespace: 'app', resourceVersion: '1' },
+    spec: {
+      routerRef: 'edge',
+      protocol: 'tcp',
+      externalPort: 8443,
+      targetPort: 443,
+      targetAddress: '10.0.20.100',
+    },
+    status: {
+      applied: false,
+      conditions: [{ type: 'Ready', status: 'False', reason: 'Pending' }],
+    },
+    ...overrides,
   }
 }

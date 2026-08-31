@@ -11,6 +11,7 @@ import { ResourceDrawer } from '../components/ResourceDrawer'
 import type { KindConfig } from '../kinds'
 import type { OutletContext } from '../layout/AppLayout'
 import { errorMessage } from '../utils/errors'
+import { liveListRefetchInterval } from '../utils/liveQuery'
 import { displayNamespace, isManaged, specSummary } from '../utils/resource'
 
 export function ResourceList({ kind }: { kind: KindConfig }) {
@@ -23,6 +24,7 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
   const list = useQuery({
     queryKey: queryKeys.resources(kind.slug, namespaceFilter),
     queryFn: () => api.listResources(kind.slug, namespaceFilter),
+    refetchInterval: liveListRefetchInterval,
   })
 
   const remove = useMutation({
