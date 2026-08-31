@@ -1,6 +1,9 @@
 ---
 layout: default
 title: Admin UI
+nav_order: 3
+redirect_from:
+  - /admin-ui.html
 ---
 
 # Admin UI
@@ -16,7 +19,7 @@ namespaces.
 
 The panel is disabled by default.
 
-![Admin UI dashboard with per-kind counts and not-ready resources](images/ui-dashboard.png)
+![Admin UI dashboard with per-kind counts and not-ready resources]({{ '/images/ui-dashboard.png' | relative_url }})
 
 ## Enable the UI
 
@@ -75,13 +78,13 @@ The UI treats owned resources as read-only:
 - The YAML view is read-only.
 - Direct update or delete requests are rejected.
 
-![Owned DNS record shown as read-only and managed by a Service](images/ui-owned-dns-record.png)
+![Owned DNS record shown as read-only and managed by a Service]({{ '/images/ui-owned-dns-record.png' | relative_url }})
 
 Change generated DNS records, routes, or port forwards on the owning
 Kubernetes resource, not in the UI. Standalone custom resources that you
 create yourself remain fully editable.
 
-See [Expose a Service, Ingress, or HTTPRoute](how-to-expose-services.md) for
+See [Expose a Service, Ingress, or HTTPRoute]({% link _guide/how-to-expose-services.md %}) for
 the annotation workflow.
 
 ## Local UI development

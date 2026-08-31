@@ -1,6 +1,9 @@
 ---
 layout: default
 title: Install and configure
+nav_order: 1
+redirect_from:
+  - /getting-started.html
 ---
 
 # Install and configure
@@ -113,7 +116,7 @@ kubectl -n mikrotik-system get mikrotikrouters
 ```
 
 Check the resource `Ready` condition and operator logs if the router is not
-connected. See [Troubleshooting](troubleshooting.md) for TLS, Secret
+connected. See [Troubleshooting]({% link _guide/troubleshooting.md %}) for TLS, Secret
 namespace, and ambiguous-router failures.
 
 ```sh
@@ -143,7 +146,7 @@ helm upgrade --install mikrotik-operator \
   --set ui.enabled=true
 ```
 
-See [Admin UI](admin-ui.md) for port-forward instructions and the read-only
+See [Admin UI]({% link _guide/admin-ui.md %}) for port-forward instructions and the read-only
 rule for resources generated from a Service, Ingress, or HTTPRoute.
 
 ## Chart and image versions

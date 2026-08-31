@@ -1,0 +1,130 @@
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% assign page_title = page.title | default: site.title %}
+  {% capture full_title %}{% if page_title and page_title != site.title %}{{ page_title }} | {{ site.title }}{% else %}{{ site.title }}{% endif %}{% endcapture %}
+  {% assign full_title = full_title | strip %}
+  {% assign page_description = page.description | default: site.description %}
+  {% assign canonical_url = page.canonical_url | default: page.url | absolute_url %}
+  {% assign page_image = page.image %}
+  {% assign seo_image = site.logo | default: '/assets/images/favicon/web-app-manifest-512x512.png' %}
+  {% if page_image %}
+    {% if page_image.src %}
+      {% assign seo_image = page_image.src %}
+    {% elsif page_image.path %}
+      {% assign seo_image = page_image.path %}
+    {% else %}
+      {% assign seo_image = page_image %}
+    {% endif %}
+  {% endif %}
+  {% assign seo_image_url = seo_image | absolute_url %}
+  <title>{{ full_title }}</title>
+  <meta name="description" content="{{ page_description | escape }}">
+  <meta name="robots" content="index,follow,max-image-preview:large">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <meta property="og:site_name" content="{{ site.title | escape }}">
+  <meta property="og:title" content="{{ full_title | escape }}">
+  <meta property="og:description" content="{{ page_description | escape }}">
+  <meta property="og:url" content="{{ canonical_url }}">
+  <meta property="og:type" content="{% if page.url == '/' %}website{% else %}article{% endif %}">
+  <meta property="og:image" content="{{ seo_image_url }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ full_title | escape }}">
+  <meta name="twitter:description" content="{{ page_description | escape }}">
+  <meta name="twitter:image" content="{{ seo_image_url }}">
+
+  {% assign theme = site.jekyll_vitepress %}
+  {% assign branding = theme.branding %}
+  {% assign logo = branding.logo %}
+  <link rel="icon" href="{{ logo.default | default: logo.light | default: '/assets/images/theme/vitepress-logo-mini.svg' | relative_url }}">
+
+  <script>
+    (function() {
+      var storageKey = 'vitepress-theme-appearance';
+      var validModes = ['auto', 'dark', 'light'];
+      function normalizeMode(value) {
+        return validModes.indexOf(value) >= 0 ? value : 'auto';
+      }
+      var mode = 'dark';
+      try {
+        var stored = window.localStorage.getItem(storageKey);
+        if (!stored) {
+          window.localStorage.setItem(storageKey, 'dark');
+          stored = 'dark';
+        }
+        if (stored) mode = normalizeMode(stored);
+      } catch (e) {}
+
+      var isDark = mode === 'dark' || (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.classList.toggle('dark', isDark);
+      document.documentElement.classList.toggle('light', !isDark);
+      document.documentElement.setAttribute('data-appearance-mode', mode);
+
+      if (/Mac|iPhone|iPad|iPod/.test(navigator.platform)) {
+        document.documentElement.classList.add('mac');
+      }
+    })();
+  </script>
+
+  <link rel="stylesheet" href="{{ '/assets/css/vitepress-core.css' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/css/vitepress-components.css' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/css/vp-icons.css' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/css/vitepress-overrides.css' | relative_url }}">
+
+  {% assign typography = theme.typography %}
+  {% assign body_font_family = typography.body_font_family %}
+  {% assign code_font_family = typography.code_font_family %}
+  {% assign token_vars_light = theme.tokens.light %}
+  {% assign token_vars_dark = theme.tokens.dark %}
+  {% assign has_theme_var_overrides = false %}
+  {% if body_font_family or code_font_family %}
+    {% assign has_theme_var_overrides = true %}
+  {% endif %}
+  {% if token_vars_light and token_vars_light.size > 0 %}
+    {% assign has_theme_var_overrides = true %}
+  {% endif %}
+  {% if token_vars_dark and token_vars_dark.size > 0 %}
+    {% assign has_theme_var_overrides = true %}
+  {% endif %}
+  {% if has_theme_var_overrides %}
+    <style id="vp-theme-vars">
+      :root {
+        {% if body_font_family %}--vp-font-family-base: {{ body_font_family }};{% endif %}
+        {% if code_font_family %}--vp-font-family-mono: {{ code_font_family }};{% endif %}
+        {% if token_vars_light %}
+          {% for pair in token_vars_light %}
+            {% assign css_var_name = pair[0] | strip %}
+            {% if css_var_name contains '--' %}
+              {{ css_var_name }}: {{ pair[1] }};
+            {% else %}
+              --{{ css_var_name }}: {{ pair[1] }};
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+      }
+      {% if token_vars_dark and token_vars_dark.size > 0 %}
+        .dark {
+          {% for pair in token_vars_dark %}
+            {% assign css_var_name = pair[0] | strip %}
+            {% if css_var_name contains '--' %}
+              {{ css_var_name }}: {{ pair[1] }};
+            {% else %}
+              --{{ css_var_name }}: {{ pair[1] }};
+            {% endif %}
+          {% endfor %}
+        }
+      {% endif %}
+    </style>
+  {% endif %}
+
+  {% assign rouge_css = theme._generated_rouge_css %}
+  {% if rouge_css and rouge_css != '' %}
+    <style id="vp-rouge-theme">
+{{ rouge_css }}
+    </style>
+  {% endif %}
+
+  {% include jekyll_vitepress/head_end.html %}
+  <script src="{{ '/assets/vendor/turbo.js' | relative_url }}" defer></script>
+  <script src="{{ '/assets/js/vitepress-theme.js' | relative_url }}" defer></script>
+</head>

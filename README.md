@@ -13,7 +13,7 @@ where a MikroTik router is the network gateway.
 
 Read the [public documentation](https://zeljkobenovic.github.io/mikrotik-operator/)
 for installation, usage, reference, architecture, and
-[troubleshooting](docs/troubleshooting.md).
+[troubleshooting](docs/_guide/troubleshooting.md).
 
 It creates DNS records, routes, NAT port forwards, and firewall rules while
 only managing configuration entries that it owns. Existing RouterOS rules are
@@ -258,8 +258,8 @@ opening a pull request. Use the repository issue forms for bug reports and
 feature requests.
 
 The operator architecture is documented in
-[`docs/how-it-works.md`](docs/how-it-works.md). Operational failures and
-common pitfalls are in [`docs/troubleshooting.md`](docs/troubleshooting.md).
+[`docs/_reference/how-it-works.md`](docs/_reference/how-it-works.md). Operational failures and
+common pitfalls are in [`docs/_guide/troubleshooting.md`](docs/_guide/troubleshooting.md).
 
 Use a dedicated RouterOS account with only the API policies required by the
 deployment, and keep RouterOS reachable from the operator Pod over TCP 8728

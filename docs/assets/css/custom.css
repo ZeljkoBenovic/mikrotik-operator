@@ -1,0 +1,5 @@
+.VPHero.has-image .image-src {
+  width: min(100%, 36rem);
+  height: auto;
+  max-width: 36rem;
+}
