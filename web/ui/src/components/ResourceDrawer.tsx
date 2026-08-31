@@ -1,10 +1,11 @@
 import { App, Button, Drawer, Form, Space, Switch, Typography } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, queryKeys } from '../api/client'
 import type { ResourceObject } from '../api/types'
 import type { KindConfig } from '../kinds'
 import { errorMessage } from '../utils/errors'
+import { kubernetesNameError, sanitizeKubernetesName } from '../utils/k8sName'
 import { isManaged, toSubmitBody } from '../utils/resource'
 import { fromYAML, toYAML } from '../utils/yaml'
 import { YamlEditor } from './YamlEditor'
@@ -37,16 +38,22 @@ export function ResourceDrawer({
   const [form] = Form.useForm()
   const [yamlMode, setYamlMode] = useState(false)
   const [yamlText, setYamlText] = useState('')
+  const seededOpen = useRef(false)
   const config = useQuery({ queryKey: queryKeys.config, queryFn: api.config })
   const createMode = mode === 'create'
   const owned = Boolean(resource && isManaged(resource))
   const operatorNamespace = config.data || 'default'
+  const waitingForConfig = createMode && !config.data
 
   useEffect(() => {
     if (!open) {
+      seededOpen.current = false
       return
     }
-    if (createMode && !config.data) {
+    if (seededOpen.current) {
+      return
+    }
+    if (waitingForConfig) {
       return
     }
     const ns = resource?.metadata.namespace || operatorNamespace
@@ -67,7 +74,8 @@ export function ResourceDrawer({
       : emptyResource(kind, ns)
     setYamlText(toYAML(body))
     setYamlMode(false)
-  }, [open, resource, kind, form, createMode, config.data, operatorNamespace])
+    seededOpen.current = true
+  }, [open, resource, kind, form, waitingForConfig, operatorNamespace])
 
   const mutation = useMutation({
     mutationFn: async (body: ResourceObject) => {
@@ -128,6 +136,10 @@ export function ResourceDrawer({
         if (!parsed.metadata?.name) {
           throw new Error('metadata.name is required')
         }
+        const nameError = kubernetesNameError(parsed.metadata.name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
         if (createMode) {
           parsed.metadata.namespace = operatorNamespace
         } else if (!parsed.metadata.namespace) {
@@ -136,6 +148,10 @@ export function ResourceDrawer({
         await mutation.mutateAsync(parsed)
         return
       }
+      form.setFieldValue(
+        'name',
+        sanitizeKubernetesName(String(form.getFieldValue('name') ?? ''), { finalize: true }),
+      )
       const values = await form.validateFields()
       const body = resourceFromForm(kind, values)
       if (createMode) {
@@ -185,7 +201,7 @@ export function ResourceDrawer({
       extra={
         <Space>
           <Typography.Text type="secondary">YAML</Typography.Text>
-          <Switch checked={yamlMode} onChange={toggleYaml} />
+          <Switch checked={yamlMode} onChange={toggleYaml} disabled={owned || waitingForConfig} />
         </Space>
       }
       footer={
@@ -195,7 +211,7 @@ export function ResourceDrawer({
             type="primary"
             onClick={() => void submit()}
             loading={mutation.isPending || (createMode && config.isLoading)}
-            disabled={owned || (createMode && !config.data)}
+            disabled={owned || waitingForConfig}
           >
             {mode === 'edit' ? 'Save' : 'Create'}
           </Button>
@@ -203,9 +219,14 @@ export function ResourceDrawer({
       }
     >
       {yamlMode ? (
-        <YamlEditor value={yamlText} onChange={setYamlText} readOnly={owned} height="calc(100vh - 220px)" />
+        <YamlEditor
+          value={yamlText}
+          onChange={setYamlText}
+          readOnly={owned || waitingForConfig}
+          height="calc(100vh - 220px)"
+        />
       ) : (
-        <Form form={form} layout="vertical" requiredMark="optional">
+        <Form form={form} layout="vertical" requiredMark="optional" disabled={waitingForConfig}>
           {kindForm()}
         </Form>
       )}
