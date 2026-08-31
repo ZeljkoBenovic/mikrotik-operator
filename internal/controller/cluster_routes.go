@@ -213,18 +213,40 @@ func endpointRouteGateway(endpoint api.RouterEndpoint, router api.MikroTikRouter
 	return router.Spec.RouteGateway
 }
 
-func clusterRouteAppliesToEndpoint(gateway string, endpoint api.RouterEndpoint, router api.MikroTikRouter) bool {
+func clusterRouteAppliesToEndpoint(gateway string, endpoint api.RouterEndpoint, router api.MikroTikRouter, nodeIPs []string) bool {
 	want := endpointRouteGateway(endpoint, router)
 	if want != "" {
 		return gateway == want
 	}
-	for _, other := range routerEndpoints(router) {
-		otherWant := endpointRouteGateway(other, router)
-		if otherWant != "" && otherWant == gateway {
-			return false
+	for _, ip := range nodeIPs {
+		if ip == gateway {
+			return true
 		}
 	}
-	return true
+	return false
+}
+
+func listNodeInternalIPs(ctx context.Context, kube client.Client) ([]string, error) {
+	var nodes corev1.NodeList
+	if err := kube.List(ctx, &nodes); err != nil {
+		return nil, err
+	}
+	ips := make([]string, 0, len(nodes.Items))
+	seen := make(map[string]struct{}, len(nodes.Items))
+	for _, node := range nodes.Items {
+		for _, address := range node.Status.Addresses {
+			if address.Type != corev1.NodeInternalIP || address.Address == "" {
+				continue
+			}
+			if _, exists := seen[address.Address]; exists {
+				break
+			}
+			seen[address.Address] = struct{}{}
+			ips = append(ips, address.Address)
+			break
+		}
+	}
+	return ips, nil
 }
 
 func clusterRouteSourceValue(namespace, sourceName string) string {

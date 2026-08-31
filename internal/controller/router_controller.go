@@ -2655,8 +2655,25 @@ func (r *RouteReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 	}
 	if err := withRouterConnections(ctx, r.Client, r.Factory, routerKey, true, func(router api.MikroTikRouter, connections []routerConnection) error {
 		generated := route.Labels[clusterRouteSourceLabel] != ""
+		var nodeIPs []string
+		if generated {
+			needsNodeIPs := false
+			for _, connection := range connections {
+				if endpointRouteGateway(connection.Endpoint, router) == "" {
+					needsNodeIPs = true
+					break
+				}
+			}
+			if needsNodeIPs {
+				var err error
+				nodeIPs, err = listNodeInternalIPs(ctx, r.Client)
+				if err != nil {
+					return err
+				}
+			}
+		}
 		for _, connection := range connections {
-			if generated && !clusterRouteAppliesToEndpoint(route.Spec.Gateway, connection.Endpoint, router) {
+			if generated && !clusterRouteAppliesToEndpoint(route.Spec.Gateway, connection.Endpoint, router, nodeIPs) {
 				if err := connection.Client.DeleteRoute(ctx, comment); err != nil {
 					return err
 				}
