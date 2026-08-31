@@ -31,6 +31,8 @@ For a ClusterIP Service, the operator creates a static DNS record pointing to
 the ClusterIP and a `/32` route through node InternalIP addresses. By default,
 all eligible nodes are used for redundancy. Set
 `mikrotik.operator.io/route-mode: single-node` to use one node instead.
+Headless Services (`clusterIP: None`) are skipped. `public-ip` forwards only
+TCP and UDP ports.
 
 ## Expose a NodePort Service
 
@@ -72,9 +74,12 @@ spec:
                   number: 80
 ```
 
+The IngressClass name must be `mikrotik`, and the cluster `IngressClass`
+object must use controller `mikrotik.operator.io/controller`. Ingresses
+without that class are ignored and any previously owned children are removed.
+
 With `public-ip`, only the Service ports selected by Ingress paths receive
-port forwards. HTTP and HTTPS listener rules are handled independently when
-both are present.
+port forwards. Only TCP and UDP ports are forwarded.
 
 ## Use Gateway API HTTPRoute
 
@@ -90,8 +95,19 @@ helm upgrade --install mikrotik-operator \
 ```
 
 Create an `HTTPRoute` attached to the configured GatewayClass. The operator
-checks the Gateway listener hostname, protocol, route kind, and allowed
-namespace policy before creating any RouterOS configuration.
+creates DNS and routes only after all of the following are true:
+
+- Gateway API CRDs are installed and `gatewayAPI.enabled` is true.
+- The parent Gateway uses the configured GatewayClass
+  (`mikrotik` / `mikrotik.operator.io/controller` by default).
+- A listener protocol is HTTP or HTTPS (TCP/UDP listeners are ignored).
+- The listener hostname intersects the HTTPRoute hostnames.
+- `allowedRoutes` permits this HTTPRoute (same namespace by default, or
+  `All` / label selector).
+- Cross-namespace Service backends have a Gateway API `ReferenceGrant`
+  in the Service namespace allowing this HTTPRoute.
+
+See [`examples/gateway-api.yaml`](https://github.com/ZeljkoBenovic/mikrotik-operator/blob/main/examples/gateway-api.yaml).
 
 ## Remove managed configuration
 
