@@ -76,6 +76,9 @@ const (
 	routerOSOperationTimeout = 15 * time.Second
 	routerOSBackupTimeout    = 60 * time.Second
 	restoreFileName          = "mikrotik-operator-restore.rsc"
+	// RouterOS rejects /file/set contents= above ~4095 bytes on v6 and ~60KiB
+	// on v7. Chunk under the v6 cap so a 1MiB export can restore on both.
+	maxRestoreFileContentsBytes = 4095
 )
 
 func Dial(ctx context.Context, address string, port int32, useTLS bool, username, password string) (Client, error) {
