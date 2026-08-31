@@ -62,6 +62,8 @@ test -n "$ui_deploy"
 kubectl -n "$NAMESPACE" rollout status "$ui_deploy" --timeout=180s
 
 kubectl create namespace "$WORKLOAD_NS" --dry-run=client -o yaml | kubectl apply -f -
+# Create the controller owner first. A DNS record with a dangling owner UID is
+# garbage-collected almost immediately, which made GET owned-dns a flake.
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Secret
@@ -84,7 +86,6 @@ spec:
     port: 80
     targetPort: 80
 EOF
-
 # Kubernetes garbage-collects objects whose controller owner is missing.
 # Create Service/web first and reuse its UID so owned-dns is not orphaned.
 web_uid="$(kubectl -n "$WORKLOAD_NS" get svc web -o jsonpath='{.metadata.uid}')"

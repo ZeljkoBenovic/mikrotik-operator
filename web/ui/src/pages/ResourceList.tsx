@@ -11,6 +11,7 @@ import { ResourceDrawer } from '../components/ResourceDrawer'
 import type { KindConfig } from '../kinds'
 import type { OutletContext } from '../layout/AppLayout'
 import { errorMessage } from '../utils/errors'
+import { liveListRefetchInterval } from '../utils/liveQuery'
 import { displayNamespace, isManaged, specSummary } from '../utils/resource'
 
 export function ResourceList({ kind }: { kind: KindConfig }) {
@@ -25,6 +26,7 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
   const list = useQuery({
     queryKey: queryKeys.resources(kind.slug, namespaceFilter),
     queryFn: () => api.listResources(kind.slug, namespaceFilter),
+    refetchInterval: liveListRefetchInterval,
   })
 
   const remove = useMutation({
@@ -57,6 +59,20 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
       return hay.includes(q)
     })
   }, [kind.apiKind, list.data, search])
+
+  const liveDrawerResource = useMemo(() => {
+    const snapshot = drawer?.resource
+    if (!snapshot) {
+      return snapshot
+    }
+    return (
+      (list.data ?? []).find(
+        (item) =>
+          item.metadata.name === snapshot.metadata.name &&
+          item.metadata.namespace === snapshot.metadata.namespace,
+      ) ?? snapshot
+    )
+  }, [drawer?.resource, list.data])
 
   function showCreatedResource(namespace: string) {
     if (!namespaceFilter || namespaceFilter === namespace) {
@@ -156,7 +172,7 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
         kind={kind}
         open={Boolean(drawer)}
         mode={drawer?.mode ?? 'create'}
-        resource={drawer?.resource}
+        resource={liveDrawerResource}
         onClose={() => setDrawer(null)}
         onCreated={showCreatedResource}
       />
