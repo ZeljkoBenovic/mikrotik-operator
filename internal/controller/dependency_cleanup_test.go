@@ -385,14 +385,16 @@ func externalCleanupFixture(t *testing.T) (*runtime.Scheme, []client.Object, ros
 }
 
 type recordingRouterClient struct {
-	ensuredDNS      int
-	ensuredRoutes   int
-	ensuredForwards int
-	ensuredFirewall int
-	deletedDNS      int
-	deletedRoutes   int
-	deletedForwards int
-	deletedFirewall int
+	ensuredDNS           int
+	ensuredRoutes        int
+	ensuredForwards      int
+	ensuredFirewall      int
+	deletedDNS           int
+	deletedRoutes        int
+	deletedForwards      int
+	deletedFirewall      int
+	ensuredRouteGateways []string
+	deletedRouteComments []string
 }
 
 func (client *recordingRouterClient) EnsureDNS(context.Context, string, string, string, string) error {
@@ -413,14 +415,18 @@ func (client *recordingRouterClient) DeletePortForward(context.Context, string) 
 	return nil
 }
 func (*recordingRouterClient) EnsureRoute(context.Context, string, string, string) error { return nil }
-func (*recordingRouterClient) EnsureRouteWithDistance(context.Context, string, string, int32, string) error {
+func (client *recordingRouterClient) EnsureRouteWithDistance(_ context.Context, _, gateway string, _ int32, _ string) error {
+	client.ensuredRouteGateways = append(client.ensuredRouteGateways, gateway)
 	return nil
 }
 func (client *recordingRouterClient) EnsureRoutes(context.Context, string, []string, string) error {
 	client.ensuredRoutes++
 	return nil
 }
-func (*recordingRouterClient) DeleteRoute(context.Context, string) error { return nil }
+func (client *recordingRouterClient) DeleteRoute(_ context.Context, comment string) error {
+	client.deletedRouteComments = append(client.deletedRouteComments, comment)
+	return nil
+}
 func (client *recordingRouterClient) DeleteRoutesByPrefix(context.Context, string) error {
 	client.deletedRoutes++
 	return nil

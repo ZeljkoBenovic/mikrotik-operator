@@ -156,31 +156,75 @@ func clusterRouteGateways(
 		}
 		return nil, err
 	}
-	if gateways := configuredRouteGateways(router); len(gateways) > 0 {
-		return gateways, nil
-	}
-	return routeGateways(ctx, kube, service)
+	return desiredClusterRouteGateways(ctx, kube, service, router)
 }
 
-func configuredRouteGateways(router api.MikroTikRouter) []string {
-	endpoints := routerEndpoints(router)
-	gateways := make([]string, 0, len(endpoints))
-	seen := make(map[string]struct{}, len(endpoints))
-	for _, endpoint := range endpoints {
-		gateway := endpoint.RouteGateway
-		if gateway == "" {
-			gateway = router.Spec.RouteGateway
+func desiredClusterRouteGateways(
+	ctx context.Context,
+	kube client.Client,
+	service corev1.Service,
+	router api.MikroTikRouter,
+) ([]string, error) {
+	gateways := make([]string, 0)
+	seen := make(map[string]struct{})
+	add := func(values ...string) {
+		for _, value := range values {
+			if value == "" {
+				continue
+			}
+			if _, exists := seen[value]; exists {
+				continue
+			}
+			seen[value] = struct{}{}
+			gateways = append(gateways, value)
 		}
-		if gateway == "" {
-			continue
-		}
-		if _, exists := seen[gateway]; exists {
-			continue
-		}
-		seen[gateway] = struct{}{}
-		gateways = append(gateways, gateway)
 	}
-	return gateways
+	var nodeIPs []string
+	var nodeErr error
+	nodesLoaded := false
+	loadNodes := func() ([]string, error) {
+		if !nodesLoaded {
+			nodesLoaded = true
+			nodeIPs, nodeErr = routeGateways(ctx, kube, service)
+		}
+		return nodeIPs, nodeErr
+	}
+	for _, endpoint := range routerEndpoints(router) {
+		if want := endpointRouteGateway(endpoint, router); want != "" {
+			add(want)
+			continue
+		}
+		nodes, err := loadNodes()
+		if err != nil {
+			return nil, err
+		}
+		add(nodes...)
+	}
+	if len(gateways) == 0 {
+		return loadNodes()
+	}
+	return gateways, nil
+}
+
+func endpointRouteGateway(endpoint api.RouterEndpoint, router api.MikroTikRouter) string {
+	if endpoint.RouteGateway != "" {
+		return endpoint.RouteGateway
+	}
+	return router.Spec.RouteGateway
+}
+
+func clusterRouteAppliesToEndpoint(gateway string, endpoint api.RouterEndpoint, router api.MikroTikRouter) bool {
+	want := endpointRouteGateway(endpoint, router)
+	if want != "" {
+		return gateway == want
+	}
+	for _, other := range routerEndpoints(router) {
+		otherWant := endpointRouteGateway(other, router)
+		if otherWant != "" && otherWant == gateway {
+			return false
+		}
+	}
+	return true
 }
 
 func clusterRouteSourceValue(namespace, sourceName string) string {

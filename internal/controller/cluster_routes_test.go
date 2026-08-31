@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
+	ros "github.com/ZeljkoBenovic/mikrotik-operator/internal/routeros"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -113,6 +114,33 @@ func TestClusterRouteGateways(t *testing.T) {
 			objects:        []client.Object{&mixedGatewayRouter, &node},
 			want:           []string{"10.1.1.1", "10.9.9.9"},
 		},
+		{
+			name:           "keeps node IPs for endpoints without routeGateway",
+			ownerNamespace: "edge",
+			routerRef:      "core",
+			objects: []client.Object{
+				&api.MikroTikRouter{
+					ObjectMeta: metav1.ObjectMeta{Name: "core", Namespace: "edge"},
+					Spec: api.MikroTikRouterSpec{
+						Routers: []api.RouterEndpoint{
+							{
+								Name:              "a",
+								Address:           "192.0.2.1",
+								CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+								RouteGateway:      "10.1.1.1",
+							},
+							{
+								Name:              "b",
+								Address:           "192.0.2.2",
+								CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+							},
+						},
+					},
+				},
+				&node,
+			},
+			want: []string{"10.1.1.1", "192.0.2.10"},
+		},
 	}
 
 	for _, test := range tests {
@@ -168,6 +196,109 @@ func TestReconcileOwnedClusterRoutesDeletesEmptyDesiredSet(t *testing.T) {
 	}
 	if len(list.Items) != 0 {
 		t.Fatalf("owned routes remained: %#v", list.Items)
+	}
+}
+
+func TestClusterRouteAppliesToEndpoint(t *testing.T) {
+	router := api.MikroTikRouter{
+		Spec: api.MikroTikRouterSpec{
+			Routers: []api.RouterEndpoint{
+				{Name: "a", Address: "192.0.2.1", RouteGateway: "10.1.1.1"},
+				{Name: "b", Address: "192.0.2.2", RouteGateway: "10.1.1.2"},
+			},
+		},
+	}
+	tests := []struct {
+		name     string
+		gateway  string
+		endpoint api.RouterEndpoint
+		want     bool
+	}{
+		{name: "endpoint a keeps its gateway", gateway: "10.1.1.1", endpoint: router.Spec.Routers[0], want: true},
+		{name: "endpoint a rejects peer gateway", gateway: "10.1.1.2", endpoint: router.Spec.Routers[0], want: false},
+		{name: "endpoint b keeps its gateway", gateway: "10.1.1.2", endpoint: router.Spec.Routers[1], want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := clusterRouteAppliesToEndpoint(test.gateway, test.endpoint, router); got != test.want {
+				t.Fatalf("got %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestRouteReconcilerAppliesGeneratedClusterRoutesPerEndpoint(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoints := []api.RouterEndpoint{
+		{
+			Name:              "a",
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+			RouteGateway:      "10.1.1.1",
+		},
+		{
+			Name:              "b",
+			Address:           "192.0.2.2",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+			RouteGateway:      "10.1.1.2",
+		},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "core", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: endpoints},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: endpoints},
+	}
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "app"},
+		Data:       map[string][]byte{"username": []byte("admin"), "password": []byte("x")},
+	}
+	routeA := generatedClusterRoute("rt-a", "10.1.1.1")
+	routeB := generatedClusterRoute("rt-b", "10.1.1.2")
+	clients := map[string]*recordingRouterClient{
+		"192.0.2.1": {},
+		"192.0.2.2": {},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&router, &secret, &routeA, &routeB).
+		WithStatusSubresource(&router, &routeA, &routeB).Build()
+	reconciler := RouteReconciler{
+		Client: kube,
+		Factory: func(_ context.Context, address string, _ int32, _ bool, _, _ string) (ros.Client, error) {
+			client, ok := clients[address]
+			if !ok {
+				t.Fatalf("unexpected router address %s", address)
+			}
+			return client, nil
+		},
+	}
+	for _, name := range []string{"rt-a", "rt-b"} {
+		if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !stringSetEqual(clients["192.0.2.1"].ensuredRouteGateways, []string{"10.1.1.1"}) {
+		t.Fatalf("endpoint a gateways %#v, want [10.1.1.1]", clients["192.0.2.1"].ensuredRouteGateways)
+	}
+	if !stringSetEqual(clients["192.0.2.2"].ensuredRouteGateways, []string{"10.1.1.2"}) {
+		t.Fatalf("endpoint b gateways %#v, want [10.1.1.2]", clients["192.0.2.2"].ensuredRouteGateways)
+	}
+}
+
+func generatedClusterRoute(name, gateway string) api.MikroTikRoute {
+	return api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			Namespace:  "app",
+			Finalizers: []string{resourceFinalizer},
+			Labels:     map[string]string{clusterRouteSourceLabel: "src"},
+			Annotations: map[string]string{
+				durableRouterTargetsAnnotation: "core",
+			},
+		},
+		Spec: api.MikroTikRouteSpec{
+			RouterRef:   "core",
+			Destination: "10.0.0.8/32",
+			Gateway:     gateway,
+		},
 	}
 }
 

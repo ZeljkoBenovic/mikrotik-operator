@@ -2653,8 +2653,15 @@ func (r *RouteReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 		route.Status.Applied = false
 		return reconcile.Result{}, r.Status().Update(ctx, &route)
 	}
-	if err := withRouterConnections(ctx, r.Client, r.Factory, routerKey, true, func(_ api.MikroTikRouter, connections []routerConnection) error {
+	if err := withRouterConnections(ctx, r.Client, r.Factory, routerKey, true, func(router api.MikroTikRouter, connections []routerConnection) error {
+		generated := route.Labels[clusterRouteSourceLabel] != ""
 		for _, connection := range connections {
+			if generated && !clusterRouteAppliesToEndpoint(route.Spec.Gateway, connection.Endpoint, router) {
+				if err := connection.Client.DeleteRoute(ctx, comment); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := connection.Client.EnsureRouteWithDistance(ctx, route.Spec.Destination, route.Spec.Gateway, route.Spec.Distance, comment); err != nil {
 				return err
 			}
