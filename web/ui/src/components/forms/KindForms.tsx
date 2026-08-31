@@ -260,6 +260,13 @@ export function PortForwardForm({ createMode }: FormCommonProps) {
         </Col>
       </Row>
       <Form.Item
+        name={['spec', 'destinationAddress']}
+        label="Destination address"
+        extra="Optional. RouterOS dst-address: the IP that initially receives the traffic. Leave empty to match any destination."
+      >
+        <Input placeholder="203.0.113.10" />
+      </Form.Item>
+      <Form.Item
         name={['spec', 'targetType']}
         label="Target"
         extra="Exactly one of target address, Service, or Pod."

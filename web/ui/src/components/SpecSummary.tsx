@@ -69,6 +69,7 @@ function itemsFor(kind: string, spec: Record<string, unknown>): { label: string;
         { label: 'Router', children: text(spec.routerRef) },
         { label: 'Protocol', children: text(spec.protocol) },
         { label: 'External port', children: text(spec.externalPort) },
+        { label: 'Destination address', children: text(spec.destinationAddress) },
         { label: 'Target port', children: text(spec.targetPort) },
         { label: 'Target address', children: text(spec.targetAddress) },
         { label: 'Service ref', children: text(spec.serviceRef) },

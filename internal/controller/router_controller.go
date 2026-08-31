@@ -2099,7 +2099,7 @@ func preflightGeneratedChildClaims(
 		if err != nil {
 			return "", err
 		}
-		if !slices.Contains(refs, desiredRouterKey) || normalizePublicIP(forward.Annotations[api.PublicIPAnnotation]) != desiredPublicIP {
+		if !slices.Contains(refs, desiredRouterKey) || normalizePublicIP(portForwardDestinationAddress(*forward)) != desiredPublicIP {
 			continue
 		}
 		for _, candidate := range portForwardCandidates {
@@ -2121,7 +2121,7 @@ func preflightGeneratedChildClaims(
 		if err != nil {
 			return "", err
 		}
-		if !slices.Contains(refs, desiredRouterKey) || normalizePublicIP(forward.Annotations[api.PublicIPAnnotation]) != desiredPublicIP {
+		if !slices.Contains(refs, desiredRouterKey) || normalizePublicIP(portForwardDestinationAddress(*forward)) != desiredPublicIP {
 			continue
 		}
 		for _, candidate := range portForwardCandidates {
@@ -2276,6 +2276,13 @@ func normalizePublicIP(value string) string {
 		return ip.String()
 	}
 	return strings.TrimSpace(value)
+}
+
+func portForwardDestinationAddress(forward api.MikroTikPortForward) string {
+	if address := strings.TrimSpace(forward.Spec.DestinationAddress); address != "" {
+		return address
+	}
+	return strings.TrimSpace(forward.Annotations[api.PublicIPAnnotation])
 }
 
 func namespacedNameFromAPI(reference *api.NamespacedName) types.NamespacedName {
@@ -2434,7 +2441,7 @@ func reconcileServicePortForwards(ctx context.Context, request portForwardReconc
 			if err := controllerutil.SetControllerReference(request.owner, &forward, request.scheme); err != nil {
 				return err
 			}
-			forward.Spec = api.MikroTikPortForwardSpec{RouterRef: request.routerRef, Protocol: candidate.protocol, ExternalPort: candidate.externalPort, TargetAddress: candidate.targetAddress, TargetPort: candidate.targetPort, ServiceRef: &api.NamespacedName{Namespace: candidate.service.Namespace, Name: candidate.service.Name}}
+			forward.Spec = api.MikroTikPortForwardSpec{RouterRef: request.routerRef, Protocol: candidate.protocol, ExternalPort: candidate.externalPort, TargetAddress: candidate.targetAddress, TargetPort: candidate.targetPort, DestinationAddress: request.publicIP, ServiceRef: &api.NamespacedName{Namespace: candidate.service.Namespace, Name: candidate.service.Name}}
 			if err := request.kube.Create(ctx, &forward); err != nil {
 				// Another watch may have reconciled the same source concurrently.
 				// The generated name is deterministic, so an AlreadyExists result
@@ -2450,12 +2457,13 @@ func reconcileServicePortForwards(ctx context.Context, request portForwardReconc
 			if !metav1.IsControlledBy(&forward, request.owner) {
 				return fmt.Errorf("port forward %s/%s already exists and is not owned by %s %s/%s", forward.Namespace, forward.Name, request.owner.GetObjectKind().GroupVersionKind().Kind, request.owner.GetNamespace(), request.owner.GetName())
 			}
-			if forward.Spec.RouterRef != request.routerRef || forward.Spec.Protocol != candidate.protocol || forward.Spec.ExternalPort != candidate.externalPort || forward.Spec.TargetAddress != candidate.targetAddress || forward.Spec.TargetPort != candidate.targetPort || forward.Spec.ServiceRef == nil || forward.Spec.ServiceRef.Name != candidate.service.Name || forward.Spec.ServiceRef.Namespace != candidate.service.Namespace || forward.Annotations[api.PublicIPAnnotation] != request.publicIP {
+			if forward.Spec.RouterRef != request.routerRef || forward.Spec.Protocol != candidate.protocol || forward.Spec.ExternalPort != candidate.externalPort || forward.Spec.TargetAddress != candidate.targetAddress || forward.Spec.TargetPort != candidate.targetPort || forward.Spec.DestinationAddress != request.publicIP || forward.Spec.ServiceRef == nil || forward.Spec.ServiceRef.Name != candidate.service.Name || forward.Spec.ServiceRef.Namespace != candidate.service.Namespace || forward.Annotations[api.PublicIPAnnotation] != request.publicIP {
 				forward.Spec.RouterRef = request.routerRef
 				forward.Spec.Protocol = candidate.protocol
 				forward.Spec.ExternalPort = candidate.externalPort
 				forward.Spec.TargetAddress = candidate.targetAddress
 				forward.Spec.TargetPort = candidate.targetPort
+				forward.Spec.DestinationAddress = request.publicIP
 				forward.Spec.ServiceRef = &api.NamespacedName{Namespace: candidate.service.Namespace, Name: candidate.service.Name}
 				if forward.Annotations == nil {
 					forward.Annotations = map[string]string{}
@@ -2911,6 +2919,10 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 		}
 		return p.status(ctx, &o, fmt.Errorf("target address %q is not an IP", address))
 	}
+	destinationAddress := portForwardDestinationAddress(o)
+	if destinationAddress != "" && net.ParseIP(destinationAddress) == nil {
+		return p.status(ctx, &o, fmt.Errorf("destination address %q is not an IP", destinationAddress))
+	}
 	routerKey, err := resolveRouterReference(ctx, p.Client, o.Namespace, o.Spec.RouterRef)
 	if err != nil {
 		if !errors.Is(err, errImplicitRouterSelection) {
@@ -2974,7 +2986,7 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 		p.Client,
 		&o,
 		routerRef,
-		o.Annotations[api.PublicIPAnnotation],
+		destinationAddress,
 		nil,
 		[]portForwardCandidate{{
 			service:       namespacedNameFromAPI(o.Spec.ServiceRef),
@@ -3003,7 +3015,7 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 				ExternalPort: o.Spec.ExternalPort,
 				Target:       address,
 				TargetPort:   o.Spec.TargetPort,
-				PublicIP:     o.Annotations[api.PublicIPAnnotation],
+				PublicIP:     destinationAddress,
 			}
 			if err := connection.Client.EnsurePortForward(ctx, forward, comment); err != nil {
 				return err
@@ -3027,7 +3039,7 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 	o.Status.Applied = true
 	o.Status.RouterRef = routerRef
 	o.Status.TargetAddress = address
-	o.Status.ExternalAddress = o.Annotations[api.PublicIPAnnotation]
+	o.Status.ExternalAddress = destinationAddress
 	o.Status.Conditions = readyCondition(o.Status.Conditions, metav1.ConditionTrue, "Applied", "port forward applied")
 	if reflect.DeepEqual(oldStatus, o.Status) {
 		return reconcile.Result{RequeueAfter: driftCheckInterval}, nil
