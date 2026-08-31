@@ -179,6 +179,9 @@ func validateUIDeployment(doc unstructured.Unstructured) []error {
 	if !hasBindAddress(container.Args) {
 		problems = append(problems, fmt.Errorf("UI container args %v missing -bind-address", container.Args))
 	}
+	if !hasNamespace(container.Args) {
+		problems = append(problems, fmt.Errorf("UI container args %v missing -namespace", container.Args))
+	}
 	if container.SecurityContext == nil || container.SecurityContext.ReadOnlyRootFilesystem == nil || !*container.SecurityContext.ReadOnlyRootFilesystem {
 		problems = append(problems, errors.New("UI container must set readOnlyRootFilesystem"))
 	}
@@ -288,6 +291,15 @@ func containsArg(args []string, want string) bool {
 func hasBindAddress(args []string) bool {
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "-bind-address=") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasNamespace(args []string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-namespace=") && len(strings.TrimPrefix(arg, "-namespace=")) > 0 {
 			return true
 		}
 	}

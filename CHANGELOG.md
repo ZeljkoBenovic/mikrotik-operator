@@ -7,6 +7,13 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Troubleshooting guide covering router selection, TLS API login, Ingress and
+  HTTPRoute attachment, and admin UI ownership conflicts.
+- Router-selection, status, Helm value, and local UI development details in the
+  existing architecture, reference, getting-started, and admin UI docs.
+
 ## [0.1.1] - 2026-08-31
 
 ### Fixed

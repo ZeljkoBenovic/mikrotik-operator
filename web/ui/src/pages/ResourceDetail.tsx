@@ -12,6 +12,7 @@ import { SpecSummary } from '../components/SpecSummary'
 import { YamlEditor } from '../components/YamlEditor'
 import type { KindConfig } from '../kinds'
 import { errorMessage } from '../utils/errors'
+import { liveResourceRefetchInterval } from '../utils/liveQuery'
 import { isManaged } from '../utils/resource'
 import { toYAML } from '../utils/yaml'
 
@@ -28,6 +29,7 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
     queryKey: queryKeys.resource(kind.slug, namespace, name),
     queryFn: () => api.getResource(kind.slug, namespace, name),
     enabled: Boolean(name),
+    refetchInterval: liveResourceRefetchInterval,
   })
 
   const remove = useMutation({
@@ -118,7 +120,7 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
                         { label: 'Connected', children: formatValue(resource.status?.connected) },
                         { label: 'Applied', children: formatValue(resource.status?.applied) },
                         { label: 'Version', children: resource.status?.version || '—' },
-                        { label: 'Router ref', children: resource.status?.routerRef || '—' },
+                        { label: 'Router', children: resource.status?.routerRef || '—' },
                         { label: 'Target address', children: resource.status?.targetAddress || '—' },
                         { label: 'External address', children: resource.status?.externalAddress || '—' },
                       ].filter((item) => item.children !== '—')}
@@ -143,7 +145,6 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
         open={editing}
         mode="edit"
         resource={resource}
-        defaultNamespace={namespace}
         onClose={() => setEditing(false)}
       />
     </>

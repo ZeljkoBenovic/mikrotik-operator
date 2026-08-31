@@ -34,6 +34,10 @@ type overviewResponse struct {
 	Kinds []kindCount `json:"kinds"`
 }
 
+type configResponse struct {
+	Namespace string `json:"namespace"`
+}
+
 type kindCount struct {
 	Kind     string `json:"kind"`
 	Count    int    `json:"count"`

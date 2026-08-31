@@ -54,7 +54,7 @@ function itemsFor(kind: string, spec: Record<string, unknown>): { label: string;
         { label: 'DNS name', children: text(spec.name) },
         { label: 'Address', children: text(spec.address) },
         { label: 'TTL', children: text(spec.ttl) },
-        { label: 'Router ref', children: text(spec.routerRef) },
+        { label: 'Router', children: text(spec.routerRef) },
         { label: 'Service ref', children: text(spec.serviceRef) },
       ]
     case 'MikroTikRoute':
@@ -62,11 +62,11 @@ function itemsFor(kind: string, spec: Record<string, unknown>): { label: string;
         { label: 'Destination', children: text(spec.destination) },
         { label: 'Gateway', children: text(spec.gateway) },
         { label: 'Distance', children: text(spec.distance) },
-        { label: 'Router ref', children: text(spec.routerRef) },
+        { label: 'Router', children: text(spec.routerRef) },
       ]
     case 'MikroTikPortForward':
       return [
-        { label: 'Router ref', children: text(spec.routerRef) },
+        { label: 'Router', children: text(spec.routerRef) },
         { label: 'Protocol', children: text(spec.protocol) },
         { label: 'External port', children: text(spec.externalPort) },
         { label: 'Target port', children: text(spec.targetPort) },
@@ -76,7 +76,7 @@ function itemsFor(kind: string, spec: Record<string, unknown>): { label: string;
       ]
     case 'MikroTikFirewallRule':
       return [
-        { label: 'Router ref', children: text(spec.routerRef) },
+        { label: 'Router', children: text(spec.routerRef) },
         { label: 'Chain', children: text(spec.chain) },
         { label: 'Action', children: text(spec.action) },
         { label: 'Protocol', children: text(spec.protocol) },

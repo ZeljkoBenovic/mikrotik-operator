@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App as AntApp, ConfigProvider } from 'antd'
 import { render, type RenderOptions } from '@testing-library/react'
 import type { ReactElement, ReactNode } from 'react'
-import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import type { OutletContext } from '../layout/AppLayout'
 
 export function createTestQueryClient(): QueryClient {
@@ -21,7 +21,9 @@ type Options = Omit<RenderOptions, 'wrapper'> & {
 }
 
 function Shell({ namespaceFilter }: { namespaceFilter?: string }) {
-  return <Outlet context={{ namespaceFilter } satisfies OutletContext} />
+  const location = useLocation()
+  const fromSearch = new URLSearchParams(location.search).get('namespace') || undefined
+  return <Outlet context={{ namespaceFilter: fromSearch ?? namespaceFilter } satisfies OutletContext} />
 }
 
 export function renderWithProviders(ui: ReactElement, options: Options = {}) {

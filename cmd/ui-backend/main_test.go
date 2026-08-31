@@ -17,6 +17,7 @@ func TestParseFlags(t *testing.T) {
 		bindAddress string
 		kubeconfig  string
 		staticDir   string
+		namespace   string
 		wantErr     bool
 	}{
 		{
@@ -26,10 +27,11 @@ func TestParseFlags(t *testing.T) {
 		},
 		{
 			name:        "overrides",
-			args:        []string{"-bind-address", "127.0.0.1:9090", "-kubeconfig", "/tmp/kubeconfig", "-static-dir", "/ui"},
+			args:        []string{"-bind-address", "127.0.0.1:9090", "-kubeconfig", "/tmp/kubeconfig", "-static-dir", "/ui", "-namespace", "mikrotik-operator-system"},
 			bindAddress: "127.0.0.1:9090",
 			kubeconfig:  "/tmp/kubeconfig",
 			staticDir:   "/ui",
+			namespace:   "mikrotik-operator-system",
 		},
 		{
 			name:    "unknown flag",
@@ -59,6 +61,9 @@ func TestParseFlags(t *testing.T) {
 			}
 			if cfg.staticDir != tt.staticDir {
 				t.Fatalf("staticDir: got %q want %q", cfg.staticDir, tt.staticDir)
+			}
+			if cfg.namespace != tt.namespace {
+				t.Fatalf("namespace: got %q want %q", cfg.namespace, tt.namespace)
 			}
 		})
 	}
@@ -92,6 +97,20 @@ func TestNewSchemeIncludesOperatorTypes(t *testing.T) {
 	scheme := newScheme()
 	if !scheme.Recognizes(api.GroupVersion.WithKind("MikroTikRouter")) {
 		t.Fatal("scheme missing MikroTikRouter")
+	}
+}
+
+func TestOperatorNamespace(t *testing.T) {
+	t.Setenv("POD_NAMESPACE", "from-env")
+	if got := operatorNamespace("from-flag"); got != "from-flag" {
+		t.Fatalf("flag: got %q", got)
+	}
+	if got := operatorNamespace(""); got != "from-env" {
+		t.Fatalf("env: got %q", got)
+	}
+	t.Setenv("POD_NAMESPACE", "")
+	if got := operatorNamespace(""); got != "default" {
+		t.Fatalf("fallback: got %q", got)
 	}
 }
 
