@@ -1,6 +1,6 @@
 import { App, Button, Drawer, Form, Space, Switch, Typography } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api, queryKeys } from '../api/client'
 import type { ResourceObject } from '../api/types'
 import type { KindConfig } from '../kinds'
@@ -40,32 +40,21 @@ export function ResourceDrawer({
   const [form] = Form.useForm()
   const [yamlMode, setYamlMode] = useState(false)
   const [yamlText, setYamlText] = useState('')
-  const [seeded, setSeeded] = useState(false)
   const config = useQuery({ queryKey: queryKeys.config, queryFn: api.config })
   const createMode = mode === 'create'
   const owned = Boolean(resource && isManaged(resource))
   const operatorNamespace = config.data || 'default'
-  const formLocked = createMode && !seeded
-
-  useEffect(() => {
-    if (!open) {
-      setSeeded(false)
-      return
-    }
-    if (createMode && !config.data && !config.isError) {
-      return
-    }
-    if (seeded) {
-      if (createMode && config.data && form.getFieldValue('namespace') !== config.data) {
-        const ns = config.data
-        form.setFieldValue('namespace', ns)
-        setYamlText((text) => yamlWithNamespace(text, ns))
-      }
-      return
-    }
+  const sessionKey = !open
+    ? 'closed'
+    : `${mode}:${resource?.metadata.uid ?? resource?.metadata.name ?? 'create'}`
+  const canSeed = open && (!createMode || Boolean(config.data) || config.isError)
+  const [appliedSeed, setAppliedSeed] = useState('closed')
+  if (!open && appliedSeed !== 'closed') {
+    setAppliedSeed('closed')
+  } else if (canSeed && appliedSeed !== sessionKey) {
+    setAppliedSeed(sessionKey)
     const ns = resource?.metadata.namespace || operatorNamespace
-    const values = resource ? formFromResource(kind, resource) : emptyForm(kind, ns)
-    form.setFieldsValue(values)
+    form.setFieldsValue(resource ? formFromResource(kind, resource) : emptyForm(kind, ns))
     const body = resource
       ? {
           apiVersion: resource.apiVersion,
@@ -81,8 +70,18 @@ export function ResourceDrawer({
       : emptyResource(kind, ns)
     setYamlText(toYAML(body))
     setYamlMode(false)
-    setSeeded(true)
-  }, [open, resource, kind, form, createMode, config.data, config.isError, operatorNamespace, seeded])
+  } else if (
+    createMode &&
+    appliedSeed === sessionKey &&
+    config.data &&
+    form.getFieldValue('namespace') !== config.data
+  ) {
+    const ns = config.data
+    form.setFieldValue('namespace', ns)
+    setYamlText((text) => yamlWithNamespace(text, ns))
+  }
+  const seeded = appliedSeed === sessionKey && sessionKey !== 'closed'
+  const formLocked = createMode && !seeded
 
   const mutation = useMutation({
     mutationFn: async (body: ResourceObject) => {

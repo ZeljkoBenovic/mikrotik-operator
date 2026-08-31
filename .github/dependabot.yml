@@ -32,10 +32,18 @@ updates:
       day: monday
       time: "04:45"
     open-pull-requests-limit: 10
+    ignore:
+      # typescript-eslint still requires typescript <6.1.0; TS 7 has no
+      # programmatic API for the linter yet.
+      - dependency-name: "typescript"
+        versions: [">=7"]
     groups:
       ui-dependencies:
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: docker
     directory: /
