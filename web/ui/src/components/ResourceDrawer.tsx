@@ -52,10 +52,15 @@ export function ResourceDrawer({
       setSeeded(false)
       return
     }
-    if (seeded) {
+    if (createMode && !config.data && !config.isError) {
       return
     }
-    if (createMode && !config.data && !config.isError) {
+    if (seeded) {
+      if (createMode && config.data && form.getFieldValue('namespace') !== config.data) {
+        const ns = config.data
+        form.setFieldValue('namespace', ns)
+        setYamlText((text) => yamlWithNamespace(text, ns))
+      }
       return
     }
     const ns = resource?.metadata.namespace || operatorNamespace
@@ -239,4 +244,17 @@ export function ResourceDrawer({
       )}
     </Drawer>
   )
+}
+
+function yamlWithNamespace(text: string, namespace: string): string {
+  try {
+    const parsed = fromYAML(text)
+    if (parsed.metadata.namespace === namespace) {
+      return text
+    }
+    parsed.metadata.namespace = namespace
+    return toYAML(parsed)
+  } catch {
+    return text
+  }
 }
