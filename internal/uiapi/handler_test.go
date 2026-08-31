@@ -435,6 +435,32 @@ func TestNamespacesList(t *testing.T) {
 	}
 }
 
+func TestConfigReturnsOperatorNamespace(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler(t)
+	rec := doRequest(t, h, http.MethodGet, "/api/config", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if stringField(t, decodeMap(t, rec), "namespace") != "default" {
+		t.Fatalf("default namespace %s", rec.Body.String())
+	}
+
+	scheme := testScheme(t)
+	custom := New(Options{
+		Client:    fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Namespace: "mikrotik-operator-system",
+	})
+	rec = doRequest(t, custom, http.MethodGet, "/api/config", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if stringField(t, decodeMap(t, rec), "namespace") != "mikrotik-operator-system" {
+		t.Fatalf("configured namespace %s", rec.Body.String())
+	}
+}
+
 func TestUnknownAPIPathNotFound(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(t)

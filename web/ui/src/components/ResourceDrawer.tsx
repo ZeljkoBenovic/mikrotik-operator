@@ -5,6 +5,7 @@ import { api, queryKeys } from '../api/client'
 import type { ResourceObject } from '../api/types'
 import type { KindConfig } from '../kinds'
 import { errorMessage } from '../utils/errors'
+import { kubernetesNameError, sanitizeKubernetesName } from '../utils/k8sName'
 import { isManaged, toSubmitBody } from '../utils/resource'
 import { fromYAML, toYAML } from '../utils/yaml'
 import { YamlEditor } from './YamlEditor'
@@ -22,8 +23,8 @@ type ResourceDrawerProps = {
   open: boolean
   mode: 'create' | 'edit'
   resource?: ResourceObject
-  defaultNamespace?: string
   onClose: () => void
+  onCreated?: (namespace: string) => void
 }
 
 export function ResourceDrawer({
@@ -31,24 +32,33 @@ export function ResourceDrawer({
   open,
   mode,
   resource,
-  defaultNamespace,
   onClose,
+  onCreated,
 }: ResourceDrawerProps) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [form] = Form.useForm()
   const [yamlMode, setYamlMode] = useState(false)
   const [yamlText, setYamlText] = useState('')
-  const namespaceWatch = Form.useWatch('namespace', form) as string | undefined
-  const namespaces = useQuery({ queryKey: queryKeys.namespaces, queryFn: api.namespaces })
+  const [seeded, setSeeded] = useState(false)
+  const config = useQuery({ queryKey: queryKeys.config, queryFn: api.config })
   const createMode = mode === 'create'
   const owned = Boolean(resource && isManaged(resource))
+  const operatorNamespace = config.data || 'default'
+  const formLocked = createMode && !seeded
 
   useEffect(() => {
     if (!open) {
+      setSeeded(false)
       return
     }
-    const ns = resource?.metadata.namespace || defaultNamespace || 'default'
+    if (seeded) {
+      return
+    }
+    if (createMode && !config.data) {
+      return
+    }
+    const ns = resource?.metadata.namespace || operatorNamespace
     const values = resource ? formFromResource(kind, resource) : emptyForm(kind, ns)
     form.setFieldsValue(values)
     const body = resource
@@ -66,12 +76,14 @@ export function ResourceDrawer({
       : emptyResource(kind, ns)
     setYamlText(toYAML(body))
     setYamlMode(false)
-  }, [open, resource, kind, defaultNamespace, form])
+    setSeeded(true)
+  }, [open, resource, kind, form, createMode, config.data, operatorNamespace, seeded])
 
   const mutation = useMutation({
     mutationFn: async (body: ResourceObject) => {
       const payload = toSubmitBody(body)
-      const ns = payload.metadata.namespace || 'default'
+      const ns = mode === 'create' ? operatorNamespace : payload.metadata.namespace || operatorNamespace
+      payload.metadata.namespace = ns
       const name = payload.metadata.name
       if (mode === 'edit') {
         if (resource?.metadata.resourceVersion) {
@@ -82,13 +94,18 @@ export function ResourceDrawer({
       return api.createResource(kind.slug, ns, payload)
     },
     onSuccess: async (_data, body) => {
-      const ns = body.metadata.namespace || 'default'
+      const ns = mode === 'create' ? operatorNamespace : body.metadata.namespace || operatorNamespace
       await queryClient.invalidateQueries({ queryKey: queryKeys.overview })
       await queryClient.invalidateQueries({ queryKey: ['resources', kind.slug] })
       await queryClient.invalidateQueries({
         queryKey: queryKeys.resource(kind.slug, ns, body.metadata.name),
       })
-      message.success(mode === 'edit' ? `${kind.singular} updated` : `${kind.singular} created`)
+      if (mode === 'create') {
+        message.success(`${kind.singular} created in ${ns}`)
+        onCreated?.(ns)
+      } else {
+        message.success(`${kind.singular} updated`)
+      }
       onClose()
     },
     onError: (error) => {
@@ -97,23 +114,17 @@ export function ResourceDrawer({
   })
 
   function kindForm() {
-    const namespaceOptions: string[] = namespaces.data ?? (namespaceWatch ? [namespaceWatch] : ['default'])
-    const common = {
-      namespaces: namespaceOptions,
-      namespacesLoading: namespaces.isLoading,
-      createMode,
-    }
     switch (kind.apiKind) {
       case 'MikroTikRouter':
-        return <RouterForm {...common} />
+        return <RouterForm createMode={createMode} />
       case 'MikroTikDNSRecord':
-        return <DNSRecordForm {...common} />
+        return <DNSRecordForm createMode={createMode} />
       case 'MikroTikRoute':
-        return <RouteForm {...common} />
+        return <RouteForm createMode={createMode} />
       case 'MikroTikPortForward':
-        return <PortForwardForm {...common} />
+        return <PortForwardForm createMode={createMode} />
       case 'MikroTikFirewallRule':
-        return <FirewallRuleForm {...common} />
+        return <FirewallRuleForm createMode={createMode} />
       default:
         return null
     }
@@ -132,14 +143,27 @@ export function ResourceDrawer({
         if (!parsed.metadata?.name) {
           throw new Error('metadata.name is required')
         }
-        if (!parsed.metadata.namespace) {
-          parsed.metadata.namespace = defaultNamespace || 'default'
+        const nameError = kubernetesNameError(parsed.metadata.name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        if (createMode) {
+          parsed.metadata.namespace = operatorNamespace
+        } else if (!parsed.metadata.namespace) {
+          parsed.metadata.namespace = resource?.metadata.namespace || operatorNamespace
         }
         await mutation.mutateAsync(parsed)
         return
       }
+      form.setFieldValue(
+        'name',
+        sanitizeKubernetesName(String(form.getFieldValue('name') ?? ''), { finalize: true }),
+      )
       const values = await form.validateFields()
       const body = resourceFromForm(kind, values)
+      if (createMode) {
+        body.metadata.namespace = operatorNamespace
+      }
       if (mode === 'edit' && resource) {
         body.metadata.labels = resource.metadata.labels
         body.metadata.annotations = resource.metadata.annotations
@@ -184,22 +208,32 @@ export function ResourceDrawer({
       extra={
         <Space>
           <Typography.Text type="secondary">YAML</Typography.Text>
-          <Switch checked={yamlMode} onChange={toggleYaml} />
+          <Switch checked={yamlMode} onChange={toggleYaml} disabled={owned || formLocked} />
         </Space>
       }
       footer={
         <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="primary" onClick={() => void submit()} loading={mutation.isPending} disabled={owned}>
+          <Button
+            type="primary"
+            onClick={() => void submit()}
+            loading={mutation.isPending || formLocked}
+            disabled={owned || formLocked}
+          >
             {mode === 'edit' ? 'Save' : 'Create'}
           </Button>
         </Space>
       }
     >
       {yamlMode ? (
-        <YamlEditor value={yamlText} onChange={setYamlText} readOnly={owned} height="calc(100vh - 220px)" />
+        <YamlEditor
+          value={yamlText}
+          onChange={setYamlText}
+          readOnly={owned || formLocked}
+          height="calc(100vh - 220px)"
+        />
       ) : (
-        <Form form={form} layout="vertical" requiredMark="optional">
+        <Form form={form} layout="vertical" requiredMark="optional" disabled={formLocked}>
           {kindForm()}
         </Form>
       )}

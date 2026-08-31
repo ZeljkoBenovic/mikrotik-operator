@@ -1,6 +1,7 @@
 import type {
   ApiErrorBody,
   ApiKindSlug,
+  ConfigResponse,
   KindCount,
   ListResponse,
   NamespacesResponse,
@@ -150,6 +151,7 @@ export function normalizeOverview(raw: unknown): Record<string, KindCount> {
 
 export const queryKeys = {
   overview: ['overview'] as const,
+  config: ['config'] as const,
   namespaces: ['namespaces'] as const,
   secrets: (namespace: string) => ['secrets', namespace] as const,
   resources: (kind: ApiKindSlug, namespace?: string) =>
@@ -160,6 +162,12 @@ export const queryKeys = {
 
 export const api = {
   overview: () => request<OverviewResponse>('/api/overview'),
+
+  config: async (): Promise<string> => {
+    const raw = await request<ConfigResponse>('/api/config')
+    const namespace = typeof raw.namespace === 'string' ? raw.namespace.trim() : ''
+    return namespace || 'default'
+  },
 
   namespaces: async (): Promise<string[]> => {
     const raw = await request<NamespacesResponse>('/api/namespaces')

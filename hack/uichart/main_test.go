@@ -31,6 +31,7 @@ spec:
         args:
         - "-bind-address=:8080"
         - "-static-dir=/ui"
+        - "-namespace=mikrotik-operator-system"
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
@@ -200,6 +201,19 @@ func TestValidateDeploymentSecurity(t *testing.T) {
 	}
 	err = validateRendered(docs, true, true)
 	if err == nil || !strings.Contains(err.Error(), "readOnlyRootFilesystem") {
+		t.Fatalf("error %v", err)
+	}
+}
+
+func TestValidateDeploymentRequiresNamespace(t *testing.T) {
+	t.Parallel()
+	manifest := strings.Replace(enabledManifest, "\n        - \"-namespace=mikrotik-operator-system\"", "", 1)
+	docs, err := decodeDocs([]byte(manifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = validateRendered(docs, true, true)
+	if err == nil || !strings.Contains(err.Error(), "-namespace") {
 		t.Fatalf("error %v", err)
 	}
 }

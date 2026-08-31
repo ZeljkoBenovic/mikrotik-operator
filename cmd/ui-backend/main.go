@@ -15,6 +15,7 @@ import (
 	"github.com/ZeljkoBenovic/mikrotik-operator/internal/uiapi"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -31,6 +32,7 @@ type config struct {
 	bindAddress string
 	kubeconfig  string
 	staticDir   string
+	namespace   string
 }
 
 func main() {
@@ -57,9 +59,20 @@ func run(args []string) int {
 		return 1
 	}
 
+	namespace := operatorNamespace(cfg.namespace)
+	if len(validation.IsDNS1123Subdomain(namespace)) != 0 {
+		log.Error("invalid operator namespace", "namespace", namespace)
+		return 2
+	}
+
 	srv := &http.Server{
-		Addr:              cfg.bindAddress,
-		Handler:           uiapi.New(uiapi.Options{Client: kube, Logger: log, StaticDir: cfg.staticDir}),
+		Addr: cfg.bindAddress,
+		Handler: uiapi.New(uiapi.Options{
+			Client:    kube,
+			Logger:    log,
+			StaticDir: cfg.staticDir,
+			Namespace: namespace,
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -99,10 +112,21 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&cfg.bindAddress, "bind-address", ":8080", "HTTP bind address")
 	fs.StringVar(&cfg.kubeconfig, "kubeconfig", "", "Path to kubeconfig; empty uses in-cluster config")
 	fs.StringVar(&cfg.staticDir, "static-dir", defaultStaticDir(), "Directory of built SPA files")
+	fs.StringVar(&cfg.namespace, "namespace", "", "Operator namespace used for UI-created resources")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}
 	return cfg, nil
+}
+
+func operatorNamespace(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+		return ns
+	}
+	return "default"
 }
 
 func defaultStaticDir() string {

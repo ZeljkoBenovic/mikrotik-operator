@@ -47,6 +47,17 @@ describe('api client', () => {
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe('/api/secrets/app')
   })
 
+  it('reads the operator namespace from config', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        expect(String(input)).toBe('/api/config')
+        return new Response(JSON.stringify({ namespace: 'mikrotik-operator-system' }), { status: 200 })
+      }),
+    )
+    await expect(api.config()).resolves.toBe('mikrotik-operator-system')
+  })
+
   it('creates, updates, and deletes resources', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)

@@ -56,6 +56,15 @@ func run() error {
 		return err
 	}
 
+	operatorNS := env("E2E_UI_OPERATOR_NAMESPACE", "mikrotik-operator-system")
+	cfg, err := getJSON(client, base+"/api/config")
+	if err != nil {
+		return err
+	}
+	if cfg["namespace"] != operatorNS {
+		return fmt.Errorf("config namespace %v want %s", cfg["namespace"], operatorNS)
+	}
+
 	overview, err := getJSON(client, base+"/api/overview")
 	if err != nil {
 		return err

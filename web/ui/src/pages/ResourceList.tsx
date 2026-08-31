@@ -2,7 +2,7 @@ import { App, Button, Input, Space, Table, Typography } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import { Link, useOutletContext } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import { api, queryKeys } from '../api/client'
 import type { ResourceObject } from '../api/types'
 import { ManagedBadge } from '../components/ManagedBadge'
@@ -11,11 +11,14 @@ import { ResourceDrawer } from '../components/ResourceDrawer'
 import type { KindConfig } from '../kinds'
 import type { OutletContext } from '../layout/AppLayout'
 import { errorMessage } from '../utils/errors'
+import { liveListRefetchInterval } from '../utils/liveQuery'
 import { displayNamespace, isManaged, specSummary } from '../utils/resource'
 
 export function ResourceList({ kind }: { kind: KindConfig }) {
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const location = useLocation()
   const { namespaceFilter } = useOutletContext<OutletContext>()
   const [search, setSearch] = useState('')
   const [drawer, setDrawer] = useState<{ mode: 'create' | 'edit'; resource?: ResourceObject } | null>(null)
@@ -23,6 +26,7 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
   const list = useQuery({
     queryKey: queryKeys.resources(kind.slug, namespaceFilter),
     queryFn: () => api.listResources(kind.slug, namespaceFilter),
+    refetchInterval: liveListRefetchInterval,
   })
 
   const remove = useMutation({
@@ -55,6 +59,29 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
       return hay.includes(q)
     })
   }, [kind.apiKind, list.data, search])
+
+  const liveDrawerResource = useMemo(() => {
+    const snapshot = drawer?.resource
+    if (!snapshot) {
+      return snapshot
+    }
+    return (
+      (list.data ?? []).find(
+        (item) =>
+          item.metadata.name === snapshot.metadata.name &&
+          item.metadata.namespace === snapshot.metadata.namespace,
+      ) ?? snapshot
+    )
+  }, [drawer?.resource, list.data])
+
+  function showCreatedResource(namespace: string) {
+    if (!namespaceFilter || namespaceFilter === namespace) {
+      return
+    }
+    const params = new URLSearchParams(location.search)
+    params.set('namespace', namespace)
+    navigate(`${location.pathname}?${params.toString()}`, { replace: true })
+  }
 
   function confirmDelete(resource: ResourceObject) {
     if (isManaged(resource)) {
@@ -145,9 +172,9 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
         kind={kind}
         open={Boolean(drawer)}
         mode={drawer?.mode ?? 'create'}
-        resource={drawer?.resource}
-        defaultNamespace={namespaceFilter || 'default'}
+        resource={liveDrawerResource}
         onClose={() => setDrawer(null)}
+        onCreated={showCreatedResource}
       />
     </>
   )
