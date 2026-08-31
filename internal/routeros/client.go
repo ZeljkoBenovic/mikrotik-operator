@@ -48,7 +48,8 @@ type PortForward struct {
 	ExternalPort int32
 	Target       string
 	TargetPort   int32
-	PublicIP     string
+	// PublicIP is the dst-nat dst-address (the IP that initially receives traffic).
+	PublicIP string
 }
 type Factory func(context.Context, string, int32, bool, string, string) (Client, error)
 

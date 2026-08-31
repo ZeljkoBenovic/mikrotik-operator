@@ -231,6 +231,14 @@ func TestMikroTikPortForwardSchemaValidation(t *testing.T) {
 			"targetAddress": "192.0.2.10",
 			"serviceRef":    map[string]any{"namespace": "default", "name": "web-nodeport"},
 		}},
+		{name: "valid destination address", valid: true, targets: map[string]any{
+			"targetAddress":      "192.0.2.10",
+			"destinationAddress": "198.51.100.10",
+		}},
+		{name: "blank destination address", targets: map[string]any{
+			"targetAddress":      "192.0.2.10",
+			"destinationAddress": "",
+		}},
 	}
 
 	for _, test := range tests {

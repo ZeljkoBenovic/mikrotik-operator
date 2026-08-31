@@ -79,6 +79,9 @@ For port forwarding:
   unrelated Service ports.
 - Preserve explicit public IPs exactly after validating that they are IP
   addresses.
+- Optional `dst-address` on dst-nat (the IP that initially receives the traffic)
+  comes from `MikroTikPortForward` `spec.destinationAddress`, falling back to
+  the `public-ip` annotation. Omit both to match any destination.
 
 ## Routing and DNS behavior
 

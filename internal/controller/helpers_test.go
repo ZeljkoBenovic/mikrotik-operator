@@ -346,3 +346,32 @@ func TestReadyConditionChangesTransitionTimeWhenStateChanges(t *testing.T) {
 		t.Fatalf("condition was not updated: %#v", condition[0])
 	}
 }
+
+func TestPortForwardDestinationAddress(t *testing.T) {
+	tests := []struct {
+		name  string
+		spec  string
+		annot string
+		want  string
+	}{
+		{name: "spec only", spec: "203.0.113.10", want: "203.0.113.10"},
+		{name: "annotation fallback", annot: "198.51.100.10", want: "198.51.100.10"},
+		{name: "spec preferred over annotation", spec: "203.0.113.10", annot: "198.51.100.10", want: "203.0.113.10"},
+		{name: "empty", want: ""},
+		{name: "spec whitespace ignored", spec: "  203.0.113.10  ", want: "203.0.113.10"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			forward := api.MikroTikPortForward{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}},
+				Spec:       api.MikroTikPortForwardSpec{DestinationAddress: test.spec},
+			}
+			if test.annot != "" {
+				forward.Annotations[api.PublicIPAnnotation] = test.annot
+			}
+			if got := portForwardDestinationAddress(forward); got != test.want {
+				t.Fatalf("portForwardDestinationAddress() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

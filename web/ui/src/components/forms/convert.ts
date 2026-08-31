@@ -93,6 +93,9 @@ export function resourceFromForm(kind: KindConfig, values: EditorFormValues): Re
       delete spec.serviceRef
       delete spec.podRef
     }
+    if (!spec.destinationAddress) {
+      delete spec.destinationAddress
+    }
   }
   delete spec._namespace
   return {

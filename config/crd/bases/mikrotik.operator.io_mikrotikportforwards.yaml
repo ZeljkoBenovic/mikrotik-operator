@@ -23,6 +23,9 @@ spec:
     - name: ExternalPort
       type: integer
       jsonPath: .spec.externalPort
+    - name: Destination
+      type: string
+      jsonPath: .spec.destinationAddress
     - name: Target
       type: string
       jsonPath: .status.targetAddress
@@ -63,6 +66,9 @@ spec:
                 minimum: 1
                 maximum: 65535
               targetAddress:
+                type: string
+                minLength: 1
+              destinationAddress:
                 type: string
                 minLength: 1
               serviceRef:
