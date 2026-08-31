@@ -553,7 +553,11 @@ func (r *RestoreReconciler) importInline(ctx context.Context, restore api.MikroT
 		if err != nil {
 			return err
 		}
-		defer func() { _ = client.Close() }()
+		defer func() {
+			if closeErr := client.Close(); closeErr != nil {
+				ctrl.LoggerFrom(ctx).Error(closeErr, "failed to close RouterOS client", "endpoint", conn.Address)
+			}
+		}()
 		if err := client.Import(ctx, script); err != nil {
 			return err
 		}
