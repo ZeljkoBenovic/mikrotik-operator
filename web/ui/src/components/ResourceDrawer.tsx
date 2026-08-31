@@ -1,6 +1,6 @@
 import { App, Button, Drawer, Form, Space, Switch, Typography } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, queryKeys } from '../api/client'
 import type { ResourceObject } from '../api/types'
 import type { KindConfig } from '../kinds'
@@ -38,22 +38,22 @@ export function ResourceDrawer({
   const [form] = Form.useForm()
   const [yamlMode, setYamlMode] = useState(false)
   const [yamlText, setYamlText] = useState('')
-  const seededOpen = useRef(false)
+  const [seeded, setSeeded] = useState(false)
   const config = useQuery({ queryKey: queryKeys.config, queryFn: api.config })
   const createMode = mode === 'create'
   const owned = Boolean(resource && isManaged(resource))
   const operatorNamespace = config.data || 'default'
-  const waitingForConfig = createMode && !config.data
+  const formLocked = createMode && !seeded
 
   useEffect(() => {
     if (!open) {
-      seededOpen.current = false
+      setSeeded(false)
       return
     }
-    if (seededOpen.current) {
+    if (seeded) {
       return
     }
-    if (waitingForConfig) {
+    if (createMode && !config.data) {
       return
     }
     const ns = resource?.metadata.namespace || operatorNamespace
@@ -74,8 +74,8 @@ export function ResourceDrawer({
       : emptyResource(kind, ns)
     setYamlText(toYAML(body))
     setYamlMode(false)
-    seededOpen.current = true
-  }, [open, resource, kind, form, waitingForConfig, operatorNamespace])
+    setSeeded(true)
+  }, [open, resource, kind, form, createMode, config.data, operatorNamespace, seeded])
 
   const mutation = useMutation({
     mutationFn: async (body: ResourceObject) => {
@@ -201,7 +201,7 @@ export function ResourceDrawer({
       extra={
         <Space>
           <Typography.Text type="secondary">YAML</Typography.Text>
-          <Switch checked={yamlMode} onChange={toggleYaml} disabled={owned || waitingForConfig} />
+          <Switch checked={yamlMode} onChange={toggleYaml} disabled={owned || formLocked} />
         </Space>
       }
       footer={
@@ -210,8 +210,8 @@ export function ResourceDrawer({
           <Button
             type="primary"
             onClick={() => void submit()}
-            loading={mutation.isPending || (createMode && config.isLoading)}
-            disabled={owned || waitingForConfig}
+            loading={mutation.isPending || formLocked}
+            disabled={owned || formLocked}
           >
             {mode === 'edit' ? 'Save' : 'Create'}
           </Button>
@@ -222,11 +222,11 @@ export function ResourceDrawer({
         <YamlEditor
           value={yamlText}
           onChange={setYamlText}
-          readOnly={owned || waitingForConfig}
+          readOnly={owned || formLocked}
           height="calc(100vh - 220px)"
         />
       ) : (
-        <Form form={form} layout="vertical" requiredMark="optional" disabled={waitingForConfig}>
+        <Form form={form} layout="vertical" requiredMark="optional" disabled={formLocked}>
           {kindForm()}
         </Form>
       )}

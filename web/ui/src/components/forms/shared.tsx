@@ -1,6 +1,7 @@
 import { AutoComplete, Form, Input, Select, Typography } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
+import type { ResourceObject } from '../../api/types'
 import { api, queryKeys } from '../../api/client'
 import {
   KUBERNETES_NAME_MAX_LENGTH,
@@ -93,6 +94,28 @@ export function ResourceNameInput({ disabled }: { disabled: boolean }) {
   )
 }
 
+export function liveRouterRefOptions(
+  items: ResourceObject[] | undefined,
+  resourceNamespace?: string,
+): { value: string; label: string }[] {
+  const live = (items ?? []).filter((item) => !item.metadata.deletionTimestamp)
+  live.sort((a, b) => {
+    const ns = (a.metadata.namespace ?? '').localeCompare(b.metadata.namespace ?? '')
+    if (ns !== 0) {
+      return ns
+    }
+    return a.metadata.name.localeCompare(b.metadata.name)
+  })
+  return live.map((item) => {
+    const ns = item.metadata.namespace || 'default'
+    const ref = resourceNamespace && ns === resourceNamespace ? item.metadata.name : `${ns}/${item.metadata.name}`
+    return {
+      value: ref,
+      label: `${item.metadata.name} (${ns})`,
+    }
+  })
+}
+
 export function RouterRefSelect({
   namespace,
   disabled,
@@ -110,31 +133,17 @@ export function RouterRefSelect({
     queryKey: queryKeys.resources('mikrotikrouters'),
     queryFn: () => api.listResources('mikrotikrouters'),
   })
-  const options = useMemo(() => {
-    const items = (query.data ?? []).filter((item) => !item.metadata.deletionTimestamp)
-    items.sort((a, b) => {
-      const ns = (a.metadata.namespace ?? '').localeCompare(b.metadata.namespace ?? '')
-      if (ns !== 0) {
-        return ns
-      }
-      return a.metadata.name.localeCompare(b.metadata.name)
-    })
-    return items.map((item) => {
-      const ns = item.metadata.namespace || 'default'
-      const ref = !namespace || ns === namespace ? item.metadata.name : `${ns}/${item.metadata.name}`
-      return {
-        value: ref,
-        label: `${item.metadata.name} (${ns})`,
-      }
-    })
-  }, [namespace, query.data])
+  const options = useMemo(
+    () => liveRouterRefOptions(query.data, namespace),
+    [namespace, query.data],
+  )
 
   useEffect(() => {
-    if (!autoSelect || disabled || value || options.length !== 1) {
+    if (!autoSelect || disabled || !namespace || value || options.length !== 1) {
       return
     }
     onChange?.(options[0].value)
-  }, [autoSelect, disabled, onChange, options, value])
+  }, [autoSelect, disabled, namespace, onChange, options, value])
 
   const empty = !query.isLoading && options.length === 0
 

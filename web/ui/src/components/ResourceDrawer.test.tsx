@@ -127,10 +127,14 @@ describe('ResourceDrawer', () => {
       fetchMock.mock.calls.some(([url]) => String(url).includes('/api/resources/mikrotikrouters?')),
     ).toBe(false)
 
-    await user.type(await screen.findByLabelText(/^name$/i), 'ui-dns')
+    const name = await screen.findByLabelText(/^name$/i)
+    await waitFor(() => {
+      expect(name).toBeEnabled()
+    })
+    await user.type(name, 'ui-dns')
     await user.type(screen.getByLabelText(/^dns name$/i), 'ui.home.arpa')
     await user.type(screen.getByLabelText(/^address$/i), '10.0.0.8')
-    await user.click(screen.getByRole('button', { name: 'Create' }))
+    await user.click(screen.getByRole('button', { name: /create/i }))
 
     await waitFor(() => {
       const createCall = fetchMock.mock.calls.find(
@@ -157,14 +161,24 @@ describe('ResourceDrawer', () => {
     const user = userEvent.setup()
     renderWithProviders(<ResourceDrawer kind={dnsKind} open mode="create" onClose={() => {}} />)
 
-    await user.click(await screen.findByRole('combobox', { name: /^router$/i }))
+    await waitFor(
+      () => {
+        expect(screen.getByLabelText(/^name$/i)).toBeEnabled()
+        const hidden = document.querySelector('#namespace') as HTMLInputElement | null
+        expect(hidden?.value).toBe('mikrotik-operator-system')
+      },
+      { timeout: 5000 },
+    )
+    const picker = screen.getByRole('combobox')
+    expect(picker).toBeEnabled()
+    await user.click(picker)
     expect(await screen.findByText('edge (network)')).toBeInTheDocument()
     expect(screen.getByText('core (mikrotik-operator-system)')).toBeInTheDocument()
   })
 
   it('locks create fields and the YAML switch until operator config loads', async () => {
     const { loadConfig } = stubFetchDeferredConfig()
-    const { queryClient } = renderWithProviders(
+    renderWithProviders(
       <ResourceDrawer kind={routerKind} open mode="create" onClose={() => {}} />,
     )
 
@@ -175,9 +189,8 @@ describe('ResourceDrawer', () => {
 
     loadConfig()
     await waitFor(() => {
-      expect(queryClient.getQueryData(queryKeys.config)).toBe('mikrotik-operator-system')
+      expect(screen.getByLabelText(/^name$/i)).toBeEnabled()
     })
-    expect(screen.getByLabelText(/^name$/i)).toBeEnabled()
     expect(yamlSwitch()).toBeEnabled()
   })
 
