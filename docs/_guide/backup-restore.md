@@ -147,13 +147,16 @@ connection. Multi-endpoint routers are assumed to share configuration.
 
 ## Transport and RouterOS versions
 
-Backup uses `/export compact`, then `/export`. Restore uploads the script
-with `/file print file=` plus `/file set contents=` (the v6/v7 API file
-path) and runs `/import file-name=`. That path is used on both v6 and v7.
-`/system/script` is not used; its source size is far below the 1MiB snapshot
-cap. `/import` of a large script can take tens of seconds; the client allows
-60s. If a device rejects a large `contents` attribute, restore fails — there
-is no command-at-a-time fallback.
+Backup uses `/export compact`, then `/export`. Restore writes the script to a
+temporary file with `/file print file=` and `/file set contents=`, then runs
+`/import file-name=`. RouterOS only accepts `contents=` for small files
+(about 4KB on v6, about 60KB on v7), so the client splits a stored `/export`
+on statement boundaries into chunks under the v6 cap, repeats the current CLI
+path at the start of each chunk, and imports them in order. That path is used
+on both v6 and v7. `/system/script` is not used; its source size is far below
+the 1MiB snapshot cap. `/import` of a large script can take tens of seconds;
+each RouterOS call allows 60s. A single restore statement larger than the v6
+`contents=` cap cannot be uploaded this way and fails.
 
 ## Secrets in `status.export`
 

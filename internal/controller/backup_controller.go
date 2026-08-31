@@ -367,7 +367,7 @@ func (r *RestoreReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err := validateRestoreSpec(restore.Spec); err != nil {
 		return r.failRestore(ctx, &restore, err)
 	}
-	if !restore.Spec.Confirmed() {
+	if !restore.Spec.Confirmed() && !restore.Status.Applied {
 		return r.waitForConfirm(ctx, &restore)
 	}
 	backup, err := r.loadBackup(ctx, restore)
@@ -384,7 +384,7 @@ func (r *RestoreReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return r.failRestore(ctx, &restore, err)
 	}
-	if restore.Status.Applied && restore.Status.BackupUID == string(backup.UID) && restore.Status.Target == target {
+	if restoreAlreadyApplied(restore, backup, target) {
 		if restore.Status.ObservedGeneration == restore.Generation {
 			return reconcile.Result{}, nil
 		}
@@ -395,11 +395,11 @@ func (r *RestoreReconciler) Reconcile(ctx context.Context, req reconcile.Request
 		}
 		return reconcile.Result{}, r.Status().Update(ctx, &restore)
 	}
-	if restoreImportInProgress(restore, backup) {
-		if restore.Status.Target == "" {
-			restore.Status.Target = target
-		}
-		return r.finishRestore(ctx, &restore, backup, restore.Status.Target)
+	if !restore.Spec.Confirmed() {
+		return r.waitForConfirm(ctx, &restore)
+	}
+	if restoreImportCompleted(restore, backup, target) {
+		return r.finishRestore(ctx, &restore, backup, target)
 	}
 	if err := r.markImportInProgress(ctx, &restore, backup, target); err != nil {
 		return reconcile.Result{}, err
@@ -407,13 +407,22 @@ func (r *RestoreReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if _, err := r.applyRestore(ctx, restore, backup.Status.Export); err != nil {
 		return r.failRestore(ctx, &restore, err)
 	}
+	if err := r.markImportSucceeded(ctx, &restore, backup, target); err != nil {
+		return reconcile.Result{}, err
+	}
 	return r.finishRestore(ctx, &restore, backup, target)
 }
 
-func restoreImportInProgress(restore api.MikroTikRestore, backup *api.MikroTikBackup) bool {
+func restoreAlreadyApplied(restore api.MikroTikRestore, backup *api.MikroTikBackup, target string) bool {
+	return restore.Status.Applied &&
+		restore.Status.BackupUID == string(backup.UID) &&
+		restore.Status.Target == target
+}
+
+func restoreImportCompleted(restore api.MikroTikRestore, backup *api.MikroTikBackup, target string) bool {
 	return restore.Status.BackupUID == string(backup.UID) &&
-		restore.Status.ObservedGeneration == restore.Generation &&
-		conditionReasonOf(restore.Status.Conditions, "Ready") == api.ConditionImportInProgress
+		restore.Status.Target == target &&
+		conditionReasonOf(restore.Status.Conditions, "Ready") == api.ConditionImportSucceeded
 }
 
 func (r *RestoreReconciler) markImportInProgress(ctx context.Context, restore *api.MikroTikRestore, backup *api.MikroTikBackup, target string) error {
@@ -427,6 +436,24 @@ func (r *RestoreReconciler) markImportInProgress(ctx context.Context, restore *a
 		metav1.ConditionFalse,
 		api.ConditionImportInProgress,
 		"RouterOS /import is in progress",
+	)
+	if reflect.DeepEqual(oldStatus, restore.Status) {
+		return nil
+	}
+	return r.Status().Update(ctx, restore)
+}
+
+func (r *RestoreReconciler) markImportSucceeded(ctx context.Context, restore *api.MikroTikRestore, backup *api.MikroTikBackup, target string) error {
+	oldStatus := restore.Status
+	restore.Status.Applied = false
+	restore.Status.BackupUID = string(backup.UID)
+	restore.Status.Target = target
+	restore.Status.ObservedGeneration = restore.Generation
+	restore.Status.Conditions = readyCondition(
+		restore.Status.Conditions,
+		metav1.ConditionFalse,
+		api.ConditionImportSucceeded,
+		"RouterOS /import succeeded",
 	)
 	if reflect.DeepEqual(oldStatus, restore.Status) {
 		return nil
