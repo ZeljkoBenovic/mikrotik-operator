@@ -3142,6 +3142,12 @@ func Setup(mgr ctrl.Manager, factory ros.Factory, gatewayAPIEnabled bool, gatewa
 	if err := (&FirewallRuleReconciler{Client: mgr.GetClient(), Factory: factory}).SetupWithManager(mgr); err != nil {
 		return err
 	}
+	if err := (&BackupReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Factory: factory}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	if err := (&RestoreReconciler{Client: mgr.GetClient(), Factory: factory}).SetupWithManager(mgr); err != nil {
+		return err
+	}
 	return (&PortForwardReconciler{Client: mgr.GetClient(), Factory: factory}).SetupWithManager(mgr)
 }
 

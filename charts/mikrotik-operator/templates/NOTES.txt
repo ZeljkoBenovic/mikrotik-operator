@@ -20,6 +20,9 @@ Then open http://127.0.0.1:{{ .Values.ui.service.port }}
 
 Custom resources generated from a Service, Ingress, or HTTPRoute are read-only
 in the UI. Change those objects on the owning Kubernetes resource instead.
+
+Backup and restore CRs are installed with the chart. Restores stay idle until
+spec.confirm is RESTORE (the UI Confirm restore dialog sets that field).
 {{- else }}
 
 The optional admin UI is disabled. Enable it with:
@@ -29,3 +32,6 @@ The optional admin UI is disabled. Enable it with:
 WARNING: The admin UI has no authentication. Enable it only on a trusted
 network, or behind an authenticating proxy.
 {{- end }}
+
+Backup and restore custom resources are included. Restores stay idle until
+spec.confirm is RESTORE. See the backup-restore documentation.

@@ -7,7 +7,10 @@ RouterOS v6 and v7. The executable is `cmd/manager`; controllers live in
 `internal/controller`; RouterOS API operations live in `internal/routeros`.
 The public Kubernetes API is defined in `api/v1alpha1` and its CRD manifests
 are maintained in `config/crd/bases` and copied into the Helm chart under
-`charts/mikrotik-operator/crds`.
+`charts/mikrotik-operator/crds`. Backup and restore are two CRDs:
+`MikroTikBackup` (one-shot snapshot or cron policy that owns snapshot
+children) and `MikroTikRestore` (confirmed `/import`). They talk to RouterOS
+through the existing client. See `docs/_guide/backup-restore.md`.
 
 ## Required workflow
 
@@ -51,6 +54,8 @@ path and must not require credentials committed to the repository.
   create, update, or delete child CRs (`MikroTikDNSRecord`, `MikroTikRoute`,
   `MikroTikPortForward`, `MikroTikFirewallRule`). They must not call the
   RouterOS client. Only the CR’s own reconciler mutates that RouterOS kind.
+  `BackupReconciler` and `RestoreReconciler` are the CRs that run `/export`
+  and `/import`.
 
 ## Kubernetes and packaging conventions
 

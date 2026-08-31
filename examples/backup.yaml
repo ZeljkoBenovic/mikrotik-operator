@@ -1,0 +1,7 @@
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikBackup
+metadata:
+  name: edge-now
+  namespace: default
+spec:
+  routerRef: local-router

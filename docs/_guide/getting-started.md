@@ -123,6 +123,13 @@ namespace, and ambiguous-router failures.
 kubectl -n mikrotik-operator-system logs -l app.kubernetes.io/name=mikrotik-operator
 ```
 
+## Backup and restore
+
+Create a `MikroTikBackup` that references the router to capture a text
+`/export` into `status.export`. Add `spec.schedule` for cron snapshots and
+`spec.retention` to prune old children. Restores wait until
+`spec.confirm` is `RESTORE`. See [Backup and restore]({% link _guide/backup-restore.md %}).
+
 ## Optional admin UI
 
 The chart can deploy a browser panel for the MikroTik custom resources. It is
@@ -140,7 +147,7 @@ Or upgrade an existing chart install:
 ```sh
 helm upgrade --install mikrotik-operator \
   oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator \
-  --version 0.3.0 \
+  --version 0.2.0 \
   --namespace mikrotik-operator-system \
   --create-namespace \
   --set ui.enabled=true
@@ -152,13 +159,13 @@ rule for resources generated from a Service, Ingress, or HTTPRoute.
 ## Chart and image versions
 
 Helm chart package versions and operator image tags are independent. Chart
-`0.3.0` sets `appVersion` to `v0.2.0`, which is the image tag when
+`0.2.0` sets `appVersion` to `v0.2.0`, which is the image tag when
 `image.tag` is empty. Pin both when they must not drift:
 
 ```sh
 helm upgrade --install mikrotik-operator \
   oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator \
-  --version 0.3.0 \
+  --version 0.2.0 \
   --namespace mikrotik-operator-system \
   --create-namespace \
   --set image.tag=v0.2.0

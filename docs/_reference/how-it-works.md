@@ -31,7 +31,9 @@ and `password` values. Secrets are read from the router object's namespace.
    repair; connection and apply failures requeue after one minute.
 
 Existing RouterOS entries without the operator's managed comment are never
-modified or deleted.
+modified or deleted by DNS, route, NAT, or firewall reconcilers. Restore
+`/import` of a stored `/export` is the unmanaged-config exception; it does
+not wipe the device. See [Backup and restore]({% link _guide/backup-restore.md %}).
 
 Managed writes wait until `ensureRouterActive` succeeds: the router is not
 deleting, has the `mikrotik.operator.io/managed-config` finalizer, has
@@ -57,7 +59,10 @@ manager replicas without leader election are not supported.
 - `HTTPRouteReconciler` handles HTTPRoutes attached to the configured
   MikroTik GatewayClass the same way: it creates child CRs only.
 - `RouteReconciler`, `FirewallRuleReconciler`, and `PortForwardReconciler`
-  are the only controllers that talk to RouterOS for their kind.
+  are the only controllers that talk to RouterOS for their managed-comment
+  kinds.
+- `BackupReconciler` and `RestoreReconciler` use the same RouterOS client for
+  `/export` and `/import`. See [Backup and restore]({% link _guide/backup-restore.md %}).
 
 Service, Ingress, HTTPRoute, and annotation controllers must not call the
 RouterOS client. They create, update, or delete the corresponding custom

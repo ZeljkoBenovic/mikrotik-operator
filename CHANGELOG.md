@@ -15,8 +15,11 @@ and the project follows semantic versioning.
   the source for generated port-forward children.
 - Admin UI service and pod refs use searchable namespace-then-name
   dropdowns, backed by name-only list APIs.
-- `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.3.0`.
-  Operator `appVersion` remains `v0.2.0`.
+- `MikroTikBackup` and `MikroTikRestore` custom resources for text RouterOS
+  `/export` snapshots (manual or cron with retention) and confirmed `/import`.
+  Remote FTP/SMB/S3 storage is reserved and rejected until implemented.
+  Chart package version is `0.3.0` (operator `appVersion` remains `v0.2.0`
+  until the next image release).
 
 ### Fixed
 
@@ -64,7 +67,8 @@ and the project follows semantic versioning.
 
 ## [0.3.0-pre] - 2026-08-29
 
-Historical pre-release notes from before the chart reached 0.3.0.
+Historical pre-release notes from before the chart reached 0.3.0. The published
+chart version `0.3.0` is the Unreleased backup/restore package above.
 
 ### Added
 

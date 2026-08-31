@@ -14,6 +14,8 @@ rules:
   - mikrotikportforwards
   - mikrotikroutes
   - mikrotikfirewallrules
+  - mikrotikbackups
+  - mikrotikrestores
   verbs: [get, list, watch, create, update, patch, delete]
 - apiGroups:
   - mikrotik.operator.io
@@ -23,6 +25,8 @@ rules:
   - mikrotikportforwards/status
   - mikrotikroutes/status
   - mikrotikfirewallrules/status
+  - mikrotikbackups/status
+  - mikrotikrestores/status
   verbs: [get, update, patch]
 - apiGroups:
   - ""

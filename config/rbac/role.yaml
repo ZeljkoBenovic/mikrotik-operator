@@ -4,10 +4,10 @@ metadata:
   name: mikrotik-operator
 rules:
 - apiGroups: [mikrotik.operator.io]
-  resources: [mikrotikrouters, mikrotikdnsrecords, mikrotikportforwards, mikrotikroutes, mikrotikfirewallrules]
+  resources: [mikrotikrouters, mikrotikdnsrecords, mikrotikportforwards, mikrotikroutes, mikrotikfirewallrules, mikrotikbackups, mikrotikrestores]
   verbs: [get, list, watch, create, update, patch, delete]
 - apiGroups: [mikrotik.operator.io]
-  resources: [mikrotikrouters/status, mikrotikdnsrecords/status, mikrotikportforwards/status, mikrotikroutes/status, mikrotikfirewallrules/status]
+  resources: [mikrotikrouters/status, mikrotikdnsrecords/status, mikrotikportforwards/status, mikrotikroutes/status, mikrotikfirewallrules/status, mikrotikbackups/status, mikrotikrestores/status]
   verbs: [get, update, patch]
 - apiGroups: [""]
   resources: [secrets, pods, nodes]
