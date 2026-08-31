@@ -115,4 +115,62 @@ describe('ResourceDetail', () => {
     )
     expect(screen.getByLabelText(/^target address$/i)).toHaveValue('10.0.99.99')
   })
+
+  it('saves with the latest resourceVersion after status polling', async () => {
+    let served = 0
+    let freezeVersion = false
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'PUT') {
+        return jsonResponse({ metadata: { name: 'web', namespace: 'app', resourceVersion: '9' }, spec: {} })
+      }
+      if (url.includes('/api/resources/mikrotikportforwards/app/web')) {
+        if (!freezeVersion) {
+          served += 1
+        }
+        return jsonResponse(
+          portForward({
+            metadata: { name: 'web', namespace: 'app', resourceVersion: String(served) },
+            status: {
+              applied: false,
+              conditions: [{ type: 'Ready', status: 'False', reason: 'Pending' }],
+            },
+          }),
+        )
+      }
+      if (url === '/api/config') {
+        return jsonResponse({ namespace: 'mikrotik-operator-system' })
+      }
+      return jsonResponse({ items: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    const { queryClient } = renderWithProviders(<ResourceDetail kind={portForwardKind} />, {
+      route: '/port-forwards/app/web',
+      path: '/port-forwards/:namespace/:name',
+    })
+    expect(await screen.findByText('NotReady')).toBeInTheDocument()
+    const versionAtEdit = served
+    await user.click(screen.getByRole('button', { name: /edit/i }))
+    expect(await screen.findByLabelText(/^target address$/i)).toHaveValue('10.0.20.100')
+    await waitFor(
+      () => {
+        expect(served).toBeGreaterThan(versionAtEdit)
+      },
+      { timeout: 5000 },
+    )
+    freezeVersion = true
+    await queryClient.refetchQueries()
+    const liveVersion = String(served)
+    await user.click(screen.getByRole('button', { name: 'Save', hidden: true }))
+    await waitFor(() => {
+      const put = fetchMock.mock.calls.find((call) => (call[1] as RequestInit | undefined)?.method === 'PUT')
+      expect(put).toBeTruthy()
+      const body = JSON.parse(String((put?.[1] as RequestInit).body)) as {
+        metadata: { resourceVersion?: string }
+      }
+      expect(body.metadata.resourceVersion).toBe(liveVersion)
+      expect(body.metadata.resourceVersion).not.toBe(String(versionAtEdit))
+    })
+  })
 })

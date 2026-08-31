@@ -58,6 +58,20 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
     })
   }, [kind.apiKind, list.data, search])
 
+  const liveDrawerResource = useMemo(() => {
+    const snapshot = drawer?.resource
+    if (!snapshot) {
+      return snapshot
+    }
+    return (
+      (list.data ?? []).find(
+        (item) =>
+          item.metadata.name === snapshot.metadata.name &&
+          item.metadata.namespace === snapshot.metadata.namespace,
+      ) ?? snapshot
+    )
+  }, [drawer?.resource, list.data])
+
   function confirmDelete(resource: ResourceObject) {
     if (isManaged(resource)) {
       message.warning('Owned resources cannot be deleted from this UI.')
@@ -147,7 +161,7 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
         kind={kind}
         open={Boolean(drawer)}
         mode={drawer?.mode ?? 'create'}
-        resource={drawer?.resource}
+        resource={liveDrawerResource}
         onClose={() => setDrawer(null)}
       />
     </>

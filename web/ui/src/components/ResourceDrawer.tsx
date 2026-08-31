@@ -1,6 +1,6 @@
 import { App, Button, Drawer, Form, Space, Switch, Typography } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, queryKeys } from '../api/client'
 import type { ResourceObject } from '../api/types'
 import type { KindConfig } from '../kinds'
@@ -37,6 +37,7 @@ export function ResourceDrawer({
   const [form] = Form.useForm()
   const [yamlMode, setYamlMode] = useState(false)
   const [yamlText, setYamlText] = useState('')
+  const hydratedOpen = useRef(false)
   const config = useQuery({ queryKey: queryKeys.config, queryFn: api.config })
   const createMode = mode === 'create'
   const owned = Boolean(resource && isManaged(resource))
@@ -44,11 +45,16 @@ export function ResourceDrawer({
 
   useEffect(() => {
     if (!open) {
+      hydratedOpen.current = false
       return
     }
     if (createMode && !config.data) {
       return
     }
+    if (hydratedOpen.current) {
+      return
+    }
+    hydratedOpen.current = true
     const ns = resource?.metadata.namespace || operatorNamespace
     const values = resource ? formFromResource(kind, resource) : emptyForm(kind, ns)
     form.setFieldsValue(values)
