@@ -21,9 +21,12 @@ RouterOS API commands through one or more configured router endpoints.
 ## Ownership and cleanup
 
 Ingresses, HTTPRoutes, and annotated Services own generated child custom
-resources through Kubernetes owner references. Custom resources use finalizers
-when they have external RouterOS state. Router objects retain applied endpoint
-metadata so their managed entries can be removed during deletion.
+resources through Kubernetes owner references. Those controllers never call
+RouterOS themselves: they create `MikroTikDNSRecord`, `MikroTikRoute`, and
+`MikroTikPortForward` objects, and the CR controllers apply RouterOS state.
+Custom resources use finalizers when they have external RouterOS state.
+Router objects retain applied endpoint metadata so their managed entries can
+be removed during deletion.
 
 If a referenced Kubernetes dependency disappears, the operator removes the
 last known external configuration before reporting the dependency failure.

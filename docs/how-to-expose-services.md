@@ -27,10 +27,10 @@ spec:
       targetPort: 8080
 ```
 
-For a ClusterIP Service, the operator creates a static DNS record pointing to
-the ClusterIP and a `/32` route through node InternalIP addresses. By default,
-all eligible nodes are used for redundancy. Set
-`mikrotik.operator.io/route-mode: single-node` to use one node instead.
+For a ClusterIP Service, the operator creates an owned `MikroTikDNSRecord`
+pointing to the ClusterIP and owned `MikroTikRoute` objects (`/32` via node
+InternalIP addresses). By default, all eligible nodes are used for redundancy.
+Set `mikrotik.operator.io/route-mode: single-node` to use one node instead.
 
 ## Expose a NodePort Service
 
@@ -47,8 +47,8 @@ InternalIP and the allocated NodePort. The ClusterIP route is not created.
 ## Expose an Ingress
 
 Ingresses use the `mikrotik` IngressClass and do not need a DNS annotation.
-The operator creates DNS and route configuration for each hostname and backend
-Service.
+The operator creates owned `MikroTikDNSRecord` and `MikroTikRoute` resources
+for each hostname and backend Service.
 
 ```yaml
 apiVersion: networking.k8s.io/v1

@@ -47,6 +47,10 @@ path and must not require credentials committed to the repository.
   endpoints.
 - Keep controllers focused; extract helpers instead of adding more branching
   to a large `Reconcile` method.
+- Service, Ingress, HTTPRoute, and annotation controllers must only
+  create, update, or delete child CRs (`MikroTikDNSRecord`, `MikroTikRoute`,
+  `MikroTikPortForward`, `MikroTikFirewallRule`). They must not call the
+  RouterOS client. Only the CR’s own reconciler mutates that RouterOS kind.
 
 ## Kubernetes and packaging conventions
 

@@ -29,6 +29,13 @@ Build operators that reconcile correctly. Most operator bugs are not Kubernetes 
 - General k8s security posture → use `cloud-security`
 - "I want to run a workload" — that's a Deployment / Job, not an operator
 
+## This repository
+
+Service, Ingress, HTTPRoute, and annotation controllers must create, update,
+or delete child CRs (`MikroTikDNSRecord`, `MikroTikRoute`, `MikroTikPortForward`,
+`MikroTikFirewallRule`). They must not call the RouterOS client. Only the CR’s
+own reconciler mutates that RouterOS kind.
+
 ## Core principle: an operator is a reconcile loop, not a script
 
 ```

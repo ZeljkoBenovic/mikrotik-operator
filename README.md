@@ -142,9 +142,9 @@ The `public-ip` annotation creates one port forward per TCP or UDP Service
 port. For ClusterIP Services, the destination is the Service ClusterIP. For
 NodePort Services, DNS points to a node InternalIP and uses the NodePort.
 
-For ClusterIP routing, the operator adds a `/32` route through every node
-InternalIP by default. Use the following annotation when only one node should
-be used:
+For ClusterIP routing, the operator creates owned `MikroTikRoute` objects
+(`/32` through every node InternalIP by default). Use the following annotation
+when only one node should be used:
 
 ```yaml
 metadata:

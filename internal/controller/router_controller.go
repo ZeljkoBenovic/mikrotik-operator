@@ -400,9 +400,6 @@ func (d *DNSReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 	}
 	if o.Annotations[durableRouterTargetsAnnotation] != routerRef {
 		if err := cleanupRouterTargets(ctx, d.Client, d.Factory, o.Namespace, durableRouterTargets(&o, o.Status.RouterRef), routerRef, func(ctx context.Context, client ros.Client) error {
-			if err := client.DeleteRoutesByPrefix(ctx, ros.ManagedComment("ingress-route", o.Name, o.Namespace)); err != nil {
-				return err
-			}
 			return client.DeleteDNS(ctx, ros.ManagedComment("dns", o.Name, o.Namespace))
 		}); err != nil {
 			return d.status(ctx, &o, err)
@@ -442,28 +439,28 @@ func (d *DNSReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 		return reconcile.Result{}, claimErr
 	}
 	defer releaseClaim()
-	if err := withRouterConnections(ctx, d.Client, d.Factory, routerKey, true, func(router api.MikroTikRouter, connections []routerConnection) error {
+	if err := withRouterConnections(ctx, d.Client, d.Factory, routerKey, true, func(_ api.MikroTikRouter, connections []routerConnection) error {
 		for _, connection := range connections {
 			if err := connection.Client.EnsureDNS(ctx, o.Spec.Name, address, o.Spec.TTL, comment); err != nil {
 				return err
 			}
 		}
-		if referencedService == nil {
-			return nil
-		}
-		if referencedService.Spec.Type == corev1.ServiceTypeClusterIP {
-			return ensureServiceRoutes(
-				ctx,
-				d.Client,
-				*referencedService,
-				router,
-				connections,
-				"ingress-route",
-				o.Name,
-				o.Namespace,
-			)
-		}
-		return deleteManagedRoutes(ctx, connections, "ingress-route", o.Name, o.Namespace)
+		return nil
+	}); err != nil {
+		return d.status(ctx, &o, err)
+	}
+	routeServices := make([]corev1.Service, 0, 1)
+	if referencedService != nil && isClusterIPService(*referencedService) && !translatorOwnsGeneratedChildren(&o) {
+		routeServices = append(routeServices, *referencedService)
+	}
+	if err := reconcileOwnedClusterRoutes(ctx, clusterRouteReconcileRequest{
+		kube:       d.Client,
+		scheme:     d.Scheme(),
+		owner:      &o,
+		sourceName: "dns/" + o.Name,
+		namespace:  o.Namespace,
+		routerRef:  routerRef,
+		services:   routeServices,
 	}); err != nil {
 		return d.status(ctx, &o, err)
 	}
@@ -478,10 +475,17 @@ func (d *DNSReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 }
 
 func (d *DNSReconciler) cleanupConfiguration(ctx context.Context, o *api.MikroTikDNSRecord, routerRef string) error {
+	if err := reconcileOwnedClusterRoutes(ctx, clusterRouteReconcileRequest{
+		kube:       d.Client,
+		scheme:     d.Scheme(),
+		owner:      o,
+		sourceName: "dns/" + o.Name,
+		namespace:  o.Namespace,
+		routerRef:  routerRef,
+	}); err != nil {
+		return err
+	}
 	err := withRouterConnections(ctx, d.Client, d.Factory, routerKeyFromRef(o.Namespace, routerRef), false, func(_ api.MikroTikRouter, connections []routerConnection) error {
-		if err := deleteManagedRoutes(ctx, connections, "ingress-route", o.Name, o.Namespace); err != nil {
-			return err
-		}
 		for _, connection := range connections {
 			if err := connection.Client.DeleteDNS(ctx, ros.ManagedComment("dns", o.Name, o.Namespace)); err != nil {
 				return err
@@ -504,7 +508,10 @@ func (d *DNSReconciler) status(ctx context.Context, o *api.MikroTikDNSRecord, er
 	return reconcile.Result{RequeueAfter: time.Minute}, d.Status().Update(ctx, o)
 }
 func (d *DNSReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).For(&api.MikroTikDNSRecord{}).Complete(d)
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&api.MikroTikDNSRecord{}).
+		Owns(&api.MikroTikRoute{}).
+		Complete(d)
 }
 
 func splitRouterReference(reference string) (namespace, name string) {
@@ -693,13 +700,6 @@ func (s *ServiceDNSReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 		return s.reconcileServiceDeletion(ctx, &service)
 	}
 	dnsName := service.Annotations[api.DNSNameAnnotation]
-	if dnsName != "" && service.Spec.Type == corev1.ServiceTypeClusterIP && !controllerutil.ContainsFinalizer(&service, serviceRouteFinalizer) {
-		controllerutil.AddFinalizer(&service, serviceRouteFinalizer)
-		if err := s.Update(ctx, &service); err != nil {
-			return reconcile.Result{}, err
-		}
-		return reconcile.Result{}, nil
-	}
 	portForwardRequest, err := preparePortForwardReconcileRequest(ctx, portForwardReconcileRequest{
 		kube:       s.Client,
 		scheme:     s.RuntimeScheme,
@@ -737,6 +737,9 @@ func (s *ServiceDNSReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 		if err := reconcileServicePortForwards(ctx, portForwardRequest); err != nil {
 			return reconcile.Result{}, err
 		}
+		if err := s.reconcileServiceClusterRoutes(ctx, &service, resolvedRouter); err != nil {
+			return reconcile.Result{}, err
+		}
 		name := service.Name + "-dns"
 		if len(name) > 63 {
 			name = name[:63]
@@ -746,11 +749,6 @@ func (s *ServiceDNSReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 			if metav1.IsControlledBy(&record, &service) {
 				if err := s.Delete(ctx, &record); err != nil {
 					return reconcile.Result{}, err
-				}
-				for _, routerRef := range serviceRouteRouterRefs(service, &record) {
-					if err := s.reconcileClusterRoute(ctx, service, routerRef, false); err != nil {
-						return reconcile.Result{}, err
-					}
 				}
 				if controllerutil.ContainsFinalizer(&service, serviceRouteFinalizer) {
 					controllerutil.RemoveFinalizer(&service, serviceRouteFinalizer)
@@ -768,11 +766,6 @@ func (s *ServiceDNSReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 			return reconcile.Result{}, err
 		}
 		if controllerutil.ContainsFinalizer(&service, serviceRouteFinalizer) {
-			for _, routerRef := range serviceRouteRouterRefs(service, nil) {
-				if err := s.reconcileClusterRoute(ctx, service, routerRef, false); err != nil {
-					return reconcile.Result{}, err
-				}
-			}
 			controllerutil.RemoveFinalizer(&service, serviceRouteFinalizer)
 			delete(service.Annotations, serviceRouteRouterAnnotation)
 			return reconcile.Result{}, s.Update(ctx, &service)
@@ -841,38 +834,8 @@ func (s *ServiceDNSReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 	if err := reconcileServicePortForwards(ctx, portForwardRequest); err != nil {
 		return reconcile.Result{}, err
 	}
-	// A Service has no status subresource. Persist the router selected by
-	// implicit resolution on the finalizer-bearing object so cleanup remains
-	// possible if its DNS child never exists (or has already been removed).
-	knownServiceRouters := serviceRouteRouterRefs(service, nil)
-	if !slices.Contains(knownServiceRouters, routerRef) {
-		if _, err := persistServiceRouteRouterTarget(ctx, s.Client, &service, routerRef); err != nil {
-			return reconcile.Result{}, err
-		}
-		return reconcile.Result{}, nil
-	}
-	for _, previousRouter := range knownServiceRouters {
-		if previousRouter == routerRef {
-			continue
-		}
-		if err := s.reconcileClusterRoute(ctx, service, previousRouter, false); err != nil {
-			return reconcile.Result{}, err
-		}
-	}
-	if service.Annotations[serviceRouteRouterAnnotation] != routerRef {
-		if _, err := compactServiceRouteRouterTarget(ctx, s.Client, &service, routerRef); err != nil {
-			return reconcile.Result{}, err
-		}
-		return reconcile.Result{}, nil
-	}
-	if service.Spec.Type == corev1.ServiceTypeClusterIP {
-		if err := s.reconcileClusterRoute(ctx, service, routerRef, true); err != nil {
-			return reconcile.Result{}, err
-		}
-	} else {
-		if err := s.reconcileClusterRoute(ctx, service, routerRef, false); err != nil {
-			return reconcile.Result{}, err
-		}
+	if err := s.reconcileServiceClusterRoutes(ctx, &service, routerRef); err != nil {
+		return reconcile.Result{}, err
 	}
 	var record api.MikroTikDNSRecord
 	key := types.NamespacedName{Name: name, Namespace: service.Namespace}
@@ -892,15 +855,6 @@ func (s *ServiceDNSReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 		return reconcile.Result{}, fmt.Errorf("DNS record %s/%s already exists and is not owned by Service %s/%s", record.Namespace, record.Name, service.Namespace, service.Name)
 	}
 	if record.Spec.RouterRef != routerRef || record.Spec.Name != dnsName || record.Spec.Address != address {
-		oldRouterRef := record.Spec.RouterRef
-		if oldRouterRef == "" {
-			oldRouterRef = record.Status.RouterRef
-		}
-		if err := cleanupPreviousRouter(ctx, s.Client, s.Factory, service.Namespace, routerRef, oldRouterRef, func(ctx context.Context, connection ros.Client) error {
-			return deleteManagedRoutes(ctx, []routerConnection{{Client: connection}}, "clusterip-route", service.Name, service.Namespace)
-		}); err != nil {
-			return reconcile.Result{}, err
-		}
 		record.Spec.RouterRef = routerRef
 		record.Spec.Name = dnsName
 		record.Spec.Address = address
@@ -934,31 +888,21 @@ func (s *ServiceDNSReconciler) cleanupGeneratedChildren(ctx context.Context, ser
 	}); err != nil {
 		cleanupErrors = append(cleanupErrors, err)
 	}
+	if err := s.reconcileServiceClusterRoutes(ctx, service, ""); err != nil {
+		cleanupErrors = append(cleanupErrors, err)
+	}
 	return errors.Join(append([]error{cause}, cleanupErrors...)...)
 }
 
 func (s *ServiceDNSReconciler) reconcileServiceDeletion(ctx context.Context, service *corev1.Service) (reconcile.Result, error) {
+	if err := s.reconcileServiceClusterRoutes(ctx, service, ""); err != nil {
+		return reconcile.Result{}, err
+	}
 	if !controllerutil.ContainsFinalizer(service, serviceRouteFinalizer) {
 		return reconcile.Result{}, nil
 	}
-	name := service.Name + "-dns"
-	if len(name) > 63 {
-		name = name[:63]
-	}
-	var record api.MikroTikDNSRecord
-	if err := s.Get(ctx, types.NamespacedName{Name: name, Namespace: service.Namespace}, &record); err != nil && !apierrors.IsNotFound(err) {
-		return reconcile.Result{}, err
-	}
-	var recordRef *api.MikroTikDNSRecord
-	if record.Name != "" {
-		recordRef = &record
-	}
-	for _, ref := range serviceRouteRouterRefs(*service, recordRef) {
-		if err := s.reconcileClusterRoute(ctx, *service, ref, false); err != nil {
-			return reconcile.Result{}, err
-		}
-	}
 	controllerutil.RemoveFinalizer(service, serviceRouteFinalizer)
+	delete(service.Annotations, serviceRouteRouterAnnotation)
 	return reconcile.Result{}, s.Update(ctx, service)
 }
 
@@ -1020,31 +964,7 @@ func compactServiceRouteRouterTarget(ctx context.Context, kube client.Client, se
 }
 
 func (s *ServiceDNSReconciler) cleanupDeletedServiceRoutes(ctx context.Context, key types.NamespacedName) error {
-	name := key.Name + "-dns"
-	if len(name) > 63 {
-		name = name[:63]
-	}
-	var record api.MikroTikDNSRecord
-	if err := s.Get(ctx, types.NamespacedName{Name: name, Namespace: key.Namespace}, &record); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return err
-	}
-	routerRef := record.Status.RouterRef
-	if routerRef == "" {
-		routerRef = record.Spec.RouterRef
-	}
-	if routerRef == "" {
-		return nil
-	}
-	err := withRouterConnections(ctx, s.Client, s.Factory, routerKeyFromRef(key.Namespace, routerRef), false, func(_ api.MikroTikRouter, connections []routerConnection) error {
-		return deleteManagedRoutes(ctx, connections, "clusterip-route", key.Name, key.Namespace)
-	})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	return err
+	return deleteLabeledClusterRoutes(ctx, s.Client, key.Namespace, "service/"+key.Name)
 }
 
 func (s *ServiceDNSReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -1052,6 +972,7 @@ func (s *ServiceDNSReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&corev1.Service{}).
 		Owns(&api.MikroTikDNSRecord{}).
 		Owns(&api.MikroTikPortForward{}).
+		Owns(&api.MikroTikRoute{}).
 		Complete(s)
 }
 
@@ -1225,6 +1146,17 @@ func (i *IngressReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err := reconcileServicePortForwards(ctx, portForwardRequest); err != nil {
 		return reconcile.Result{}, err
 	}
+	if err := reconcileOwnedClusterRoutes(ctx, clusterRouteReconcileRequest{
+		kube:       i.Client,
+		scheme:     i.RuntimeScheme,
+		owner:      &ingress,
+		sourceName: "ingress/" + ingress.Name,
+		namespace:  ingress.Namespace,
+		routerRef:  resolvedRouter,
+		services:   services,
+	}); err != nil {
+		return reconcile.Result{}, err
+	}
 	if err := errors.Join(backendErrors...); err != nil {
 		return reconcile.Result{}, err
 	}
@@ -1298,6 +1230,18 @@ func cleanupOwnedChildren(
 			return err
 		}
 	}
+	var routes api.MikroTikRouteList
+	if err := kube.List(ctx, &routes, client.InNamespace(owner.GetNamespace())); err != nil {
+		return err
+	}
+	for index := range routes.Items {
+		if !metav1.IsControlledBy(&routes.Items[index], owner) {
+			continue
+		}
+		if err := kube.Delete(ctx, &routes.Items[index]); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
 	return reconcileServicePortForwards(ctx, portForwardReconcileRequest{
 		kube:       kube,
 		scheme:     scheme,
@@ -1312,6 +1256,7 @@ func (i *IngressReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&networkingv1.Ingress{}).
 		Owns(&api.MikroTikDNSRecord{}).
 		Owns(&api.MikroTikPortForward{}).
+		Owns(&api.MikroTikRoute{}).
 		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(i.ingressesInNamespace)).
 		Watches(&networkingv1.IngressClass{}, handler.EnqueueRequestsFromMapFunc(i.ingressesInNamespace)).
 		Complete(i)
@@ -1516,6 +1461,17 @@ func (h *HTTPRouteReconciler) Reconcile(ctx context.Context, req reconcile.Reque
 		}
 	}
 	if err := reconcileServicePortForwards(ctx, portForwardRequest); err != nil {
+		return reconcile.Result{}, err
+	}
+	if err := reconcileOwnedClusterRoutes(ctx, clusterRouteReconcileRequest{
+		kube:       h.Client,
+		scheme:     h.Scheme,
+		owner:      &route,
+		sourceName: "httproute/" + route.Name,
+		namespace:  route.Namespace,
+		routerRef:  resolvedRouter,
+		services:   services,
+	}); err != nil {
 		return reconcile.Result{}, err
 	}
 	if err := errors.Join(backendErrors...); err != nil {
@@ -1824,6 +1780,7 @@ func (h *HTTPRouteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&gatewayv1.HTTPRoute{}).
 		Owns(&api.MikroTikDNSRecord{}).
 		Owns(&api.MikroTikPortForward{}).
+		Owns(&api.MikroTikRoute{}).
 		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(h.httpRoutesForReferenceGrant)).
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(h.httpRoutesForGateway)).
 		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(h.httpRoutesForGatewayClass)).
@@ -2537,54 +2494,34 @@ func (s *ServiceDNSReconciler) resolveRouterRef(ctx context.Context, service cor
 	return types.NamespacedName{}, err
 }
 
-func (s *ServiceDNSReconciler) reconcileClusterRoute(ctx context.Context, service corev1.Service, routerRef string, present bool) error {
-	if routerRef == "" {
-		return nil
+func (s *ServiceDNSReconciler) reconcileServiceClusterRoutes(ctx context.Context, service *corev1.Service, routerRef string) error {
+	scheme := s.RuntimeScheme
+	if scheme == nil {
+		scheme = s.Scheme()
 	}
-	err := withRouterConnections(ctx, s.Client, s.Factory, routerKeyFromRef(service.Namespace, routerRef), present, func(router api.MikroTikRouter, connections []routerConnection) error {
-		if !present {
-			return deleteServiceRoutes(ctx, service, connections, "clusterip-route", service.Name, service.Namespace)
-		}
-		return ensureServiceRoutes(ctx, s.Client, service, router, connections, "clusterip-route", service.Name, service.Namespace)
+	services := make([]corev1.Service, 0, 1)
+	if serviceWantsClusterRoute(*service) {
+		services = append(services, *service)
+	}
+	return reconcileOwnedClusterRoutes(ctx, clusterRouteReconcileRequest{
+		kube:       s.Client,
+		scheme:     scheme,
+		owner:      service,
+		sourceName: "service/" + service.Name,
+		namespace:  service.Namespace,
+		routerRef:  routerRef,
+		services:   services,
 	})
-	if !present && apierrors.IsNotFound(err) {
-		return nil
-	}
-	return err
 }
 
-func ensureServiceRoutes(ctx context.Context, kube client.Client, service corev1.Service, router api.MikroTikRouter, connections []routerConnection, kind, name, namespace string) error {
-	gateways, err := routeGateways(ctx, kube, service)
-	if err != nil {
-		return err
+func serviceWantsClusterRoute(service corev1.Service) bool {
+	if service.Annotations[api.DNSNameAnnotation] == "" {
+		return false
 	}
-	for _, connection := range connections {
-		base := ros.ManagedComment(kind, name, namespace)
-		endpointGateways := gateways
-		if connection.Endpoint.RouteGateway != "" {
-			endpointGateways = []string{connection.Endpoint.RouteGateway}
-		} else if router.Spec.RouteGateway != "" {
-			endpointGateways = []string{router.Spec.RouteGateway}
-		}
-		if err := connection.Client.EnsureRoutes(ctx, service.Spec.ClusterIP+"/32", endpointGateways, base); err != nil {
-			return err
-		}
+	if !isClusterIPService(service) {
+		return false
 	}
-	return nil
-}
-
-func deleteServiceRoutes(ctx context.Context, service corev1.Service, connections []routerConnection, kind, name, namespace string) error {
-	return deleteManagedRoutes(ctx, connections, kind, name, namespace)
-}
-
-func deleteManagedRoutes(ctx context.Context, connections []routerConnection, kind, name, namespace string) error {
-	base := ros.ManagedComment(kind, name, namespace)
-	for _, connection := range connections {
-		if err := connection.Client.DeleteRoutesByPrefix(ctx, base); err != nil {
-			return err
-		}
-	}
-	return nil
+	return service.Spec.ClusterIP != "" && service.Spec.ClusterIP != corev1.ClusterIPNone
 }
 
 func routeGateways(ctx context.Context, kube client.Client, service corev1.Service) ([]string, error) {

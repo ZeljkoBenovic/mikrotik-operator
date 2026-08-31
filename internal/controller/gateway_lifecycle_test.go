@@ -648,12 +648,16 @@ func TestHTTPRouteSameServiceNameAcrossNamespacesHasUniquePortForwardChildren(t 
 	}
 	serviceOne := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"}, Spec: corev1.ServiceSpec{ClusterIP: "10.0.0.10", Ports: []corev1.ServicePort{{Port: 80}}}}
 	serviceTwo := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "other"}, Spec: corev1.ServiceSpec{ClusterIP: "10.0.0.20", Ports: []corev1.ServicePort{{Port: 81}}}}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
 	grant := referenceGrant("other", gatewayv1.ReferenceGrantFrom{
 		Group:     gatewayv1.Group(gatewayv1.GroupVersion.Group),
 		Kind:      gatewayv1.Kind("HTTPRoute"),
 		Namespace: gatewayv1.Namespace("app"),
 	}, gatewayv1.ReferenceGrantTo{Group: "", Kind: "Service", Name: pointerTo(gatewayv1.ObjectName("backend"))})
-	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway, &route, &serviceOne, &serviceTwo, &grant).Build()
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway, &route, &serviceOne, &serviceTwo, &grant, &node).Build()
 	reconciler := HTTPRouteReconciler{Client: kube, Scheme: scheme}
 	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "route")); err != nil {
 		t.Fatal(err)
@@ -732,6 +736,15 @@ func assertNoOwnedGeneratedChildren(t *testing.T, kube client.Client, owner clie
 	for _, forward := range forwards.Items {
 		if metav1.IsControlledBy(&forward, owner) {
 			t.Fatalf("owned port-forward child %s survived ambiguity preflight", forward.Name)
+		}
+	}
+	var routes api.MikroTikRouteList
+	if err := kube.List(context.Background(), &routes, client.InNamespace(owner.GetNamespace())); err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range routes.Items {
+		if metav1.IsControlledBy(&route, owner) {
+			t.Fatalf("owned route child %s survived ambiguity preflight", route.Name)
 		}
 	}
 }

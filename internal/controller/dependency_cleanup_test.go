@@ -43,8 +43,8 @@ func TestDNSNonAddressableServiceCleansEveryDurableRouter(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, routerClient := range clients {
-		if routerClient.deletedDNS == 0 || routerClient.deletedRoutes == 0 {
-			t.Fatalf("%s was not fully cleaned: DNS=%d routes=%d", name, routerClient.deletedDNS, routerClient.deletedRoutes)
+		if routerClient.deletedDNS == 0 {
+			t.Fatalf("%s was not fully cleaned: DNS=%d", name, routerClient.deletedDNS)
 		}
 	}
 }
@@ -205,8 +205,8 @@ func TestGeneratedDNSRecordLosesToDirectClaimAndCleansOnlyItself(t *testing.T) {
 	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(generated.Namespace, generated.Name)); err != nil {
 		t.Fatal(err)
 	}
-	if routerClient.deletedDNS == 0 || routerClient.deletedRoutes == 0 {
-		t.Fatalf("losing generated DNS state was not cleaned: DNS=%d routes=%d", routerClient.deletedDNS, routerClient.deletedRoutes)
+	if routerClient.deletedDNS == 0 {
+		t.Fatalf("losing generated DNS state was not cleaned: DNS=%d", routerClient.deletedDNS)
 	}
 	var storedGenerated api.MikroTikDNSRecord
 	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: generated.Namespace, Name: generated.Name}, &storedGenerated); err != nil {
@@ -385,6 +385,8 @@ func externalCleanupFixture(t *testing.T) (*runtime.Scheme, []client.Object, ros
 }
 
 type recordingRouterClient struct {
+	ensuredDNS      int
+	ensuredRoutes   int
 	ensuredForwards int
 	ensuredFirewall int
 	deletedDNS      int
@@ -393,7 +395,8 @@ type recordingRouterClient struct {
 	deletedFirewall int
 }
 
-func (*recordingRouterClient) EnsureDNS(context.Context, string, string, string, string) error {
+func (client *recordingRouterClient) EnsureDNS(context.Context, string, string, string, string) error {
+	client.ensuredDNS++
 	return nil
 }
 func (client *recordingRouterClient) DeleteDNS(context.Context, string) error {
@@ -413,7 +416,8 @@ func (*recordingRouterClient) EnsureRoute(context.Context, string, string, strin
 func (*recordingRouterClient) EnsureRouteWithDistance(context.Context, string, string, int32, string) error {
 	return nil
 }
-func (*recordingRouterClient) EnsureRoutes(context.Context, string, []string, string) error {
+func (client *recordingRouterClient) EnsureRoutes(context.Context, string, []string, string) error {
+	client.ensuredRoutes++
 	return nil
 }
 func (*recordingRouterClient) DeleteRoute(context.Context, string) error { return nil }
