@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { standaloneRouter } from '../../test/fixtures'
-import { liveRouterRefOptions } from './shared'
+import { liveRouterRefOptions } from './routerRef'
 
 describe('liveRouterRefOptions', () => {
   it('includes routers from other namespaces as namespace/name refs', () => {
