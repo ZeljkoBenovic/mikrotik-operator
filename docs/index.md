@@ -29,10 +29,10 @@ only changes RouterOS entries created and labeled by this operator.
 
 | Kubernetes resource | RouterOS configuration |
 | --- | --- |
-| `Service` annotations | DNS records, ClusterIP routes, and optional port forwards |
-| `Ingress` with class `mikrotik` | DNS records, routes, and optional port forwards |
-| `HTTPRoute` attached to the MikroTik GatewayClass | DNS records, routes, and optional port forwards |
-| `MikroTikDNSRecord` | `/ip dns static` and Service routes |
+| `Service` annotations | Owned DNS, ClusterIP route, and optional port-forward CRs |
+| `Ingress` with class `mikrotik` | Owned DNS, route, and optional port-forward CRs |
+| `HTTPRoute` attached to the MikroTik GatewayClass | Owned DNS, route, and optional port-forward CRs |
+| `MikroTikDNSRecord` | `/ip dns static`; standalone `serviceRef` also owns ClusterIP routes |
 | `MikroTikRoute` | `/ip route` |
 | `MikroTikPortForward` | `dst-nat`, `src-nat`, and forward firewall rules |
 | `MikroTikFirewallRule` | `/ip firewall filter` |

@@ -44,6 +44,7 @@ Use the narrowest applicable skill first. Load referenced material only when the
 - Use status subresources, stable Conditions, and finalizers. Do not remove a finalizer until external cleanup succeeds.
 - Return transient errors so controller-runtime retries them. Never sleep or block inside reconciliation.
 - Preserve RouterOS v6/v7 compatibility and test RouterOS command changes carefully.
+- Service, Ingress, HTTPRoute, and annotation controllers must create, update, or delete the corresponding custom resources (`MikroTikDNSRecord`, `MikroTikRoute`, `MikroTikPortForward`, `MikroTikFirewallRule`). They must not call the RouterOS client to mutate DNS, routes, NAT, or firewall entries. Only that CR’s own reconciler talks to RouterOS for its kind.
 
 ## Kubernetes and Helm rules
 

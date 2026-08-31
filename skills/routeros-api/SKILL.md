@@ -83,7 +83,9 @@ For port forwarding:
 ## Routing and DNS behavior
 
 - ClusterIP routes are single-host routes (`<clusterIP>/32`), not the whole
-  Service CIDR.
+  Service CIDR. Annotation, Ingress, and HTTPRoute controllers create
+  `MikroTikRoute` CRs for those destinations; only `RouteReconciler` calls
+  `/ip/route`.
 - Multi-node mode may create the same destination through multiple node
   InternalIP gateways for redundancy. Single-node mode intentionally selects
   one gateway.
@@ -92,7 +94,8 @@ For port forwarding:
 - DNS records that reference a Service must follow the current Service address
   and clean up when the Service disappears.
 - RouterOS DNS, route, NAT, and filter changes must be independently owned and
-  cleaned by their originating Kubernetes resource.
+  cleaned by their originating custom resource. Do not apply those mutations
+  from Service, Ingress, HTTPRoute, or annotation controllers.
 
 ## Version and testing discipline
 

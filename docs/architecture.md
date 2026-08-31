@@ -48,11 +48,13 @@ endpoint; identity is `address`, port (default `8728`/`8729`), and TLS.
 ## Ownership and cleanup
 
 Ingresses, HTTPRoutes, and annotated Services own generated child custom
-resources through Kubernetes owner references. Custom resources use the
-`mikrotik.operator.io/managed-config` finalizer when they have external
-RouterOS state. Annotated ClusterIP Services also use
-`mikrotik.operator.io/service-route` so `/32` routes can be removed after
-deletion.
+resources through Kubernetes owner references. Those controllers never call
+RouterOS themselves: they create `MikroTikDNSRecord`, `MikroTikRoute`, and
+`MikroTikPortForward` objects, and the CR controllers apply RouterOS state.
+Custom resources use the `mikrotik.operator.io/managed-config` finalizer when
+they have external RouterOS state. Older annotated ClusterIP Services may
+still carry `mikrotik.operator.io/service-route`; the operator strips that
+leftover finalizer after owned route children are deleted.
 
 Router objects retain `status.appliedEndpoints` so managed entries can be
 removed during deletion or when an endpoint is dropped. If a referenced

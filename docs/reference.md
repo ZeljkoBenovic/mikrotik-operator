@@ -9,7 +9,7 @@ title: Reference
 
 | Annotation | Applies to | Meaning |
 | --- | --- | --- |
-| `mikrotik.operator.io/dns-name` | Service | Creates or updates an owned RouterOS DNS record. |
+| `mikrotik.operator.io/dns-name` | Service | Creates or updates an owned `MikroTikDNSRecord`. For ClusterIP Services, also creates owned `MikroTikRoute` objects (`/32` via node InternalIPs). |
 | `mikrotik.operator.io/public-ip` | Service, Ingress, HTTPRoute, `MikroTikPortForward` | Creates `dst-nat`/`src-nat` (and a forward filter rule) for selected TCP or UDP ports. The value must be an IP address. On a standalone port-forward CR it is the external address. |
 | `mikrotik.operator.io/router-ref` | Service, Ingress, HTTPRoute and custom resources | Selects a `MikroTikRouter` by name in the resource namespace, or as `namespace/name` for a router in another namespace. See [Architecture](architecture.md#router-selection). |
 | `mikrotik.operator.io/route-mode` | Service | `all-nodes` (default) or `single-node`. Other values are rejected. |
@@ -38,8 +38,9 @@ with reason `Connected` means the API login succeeded.
 ### `MikroTikDNSRecord`
 
 Defines `spec.name` and `spec.address`, with optional `spec.ttl` and
-`spec.serviceRef`. A Service reference makes the address follow the Service and
-also enables the corresponding Service route behavior.
+`spec.serviceRef`. A Service reference makes the address follow the Service.
+Standalone records (not owned by a Service, Ingress, or HTTPRoute) also
+create owned `MikroTikRoute` children for ClusterIP backends.
 
 ### `MikroTikRoute`
 
