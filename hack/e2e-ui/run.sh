@@ -62,6 +62,8 @@ test -n "$ui_deploy"
 kubectl -n "$NAMESPACE" rollout status "$ui_deploy" --timeout=180s
 
 kubectl create namespace "$WORKLOAD_NS" --dry-run=client -o yaml | kubectl apply -f -
+# Create the controller owner first. A DNS record with a dangling owner UID is
+# garbage-collected almost immediately, which made GET owned-dns a flake.
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Secret
@@ -73,6 +75,20 @@ stringData:
   username: admin
   password: super-secret-e2e
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: ${WORKLOAD_NS}
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+EOF
+web_uid="$(kubectl -n "$WORKLOAD_NS" get svc web -o jsonpath='{.metadata.uid}')"
+test -n "$web_uid"
+kubectl apply -f - <<EOF
 apiVersion: mikrotik.operator.io/v1alpha1
 kind: MikroTikDNSRecord
 metadata:
@@ -82,7 +98,7 @@ metadata:
   - apiVersion: v1
     kind: Service
     name: web
-    uid: 00000000-0000-0000-0000-000000000001
+    uid: ${web_uid}
     controller: true
 spec:
   name: owned.e2e.home.arpa
