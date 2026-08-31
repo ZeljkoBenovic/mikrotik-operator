@@ -648,6 +648,13 @@ func TestHTTPRouteSameServiceNameAcrossNamespacesHasUniquePortForwardChildren(t 
 	}
 	serviceOne := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"}, Spec: corev1.ServiceSpec{ClusterIP: "10.0.0.10", Ports: []corev1.ServicePort{{Port: 80}}}}
 	serviceTwo := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "other"}, Spec: corev1.ServiceSpec{ClusterIP: "10.0.0.20", Ports: []corev1.ServicePort{{Port: 81}}}}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
 	node := corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
 		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
@@ -657,7 +664,7 @@ func TestHTTPRouteSameServiceNameAcrossNamespacesHasUniquePortForwardChildren(t 
 		Kind:      gatewayv1.Kind("HTTPRoute"),
 		Namespace: gatewayv1.Namespace("app"),
 	}, gatewayv1.ReferenceGrantTo{Group: "", Kind: "Service", Name: pointerTo(gatewayv1.ObjectName("backend"))})
-	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway, &route, &serviceOne, &serviceTwo, &grant, &node).Build()
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway, &route, &serviceOne, &serviceTwo, &router, &grant, &node).Build()
 	reconciler := HTTPRouteReconciler{Client: kube, Scheme: scheme}
 	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "route")); err != nil {
 		t.Fatal(err)
@@ -699,15 +706,15 @@ func ingressRuleForService(host, service string, port int32) networkingv1.Ingres
 
 func mikroTikGatewayFixture() (gatewayv1.GatewayClass, gatewayv1.Gateway) {
 	return gatewayv1.GatewayClass{
-		ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
-		Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
-	}, gatewayv1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
-		Spec: gatewayv1.GatewaySpec{
-			GatewayClassName: api.GatewayClassName,
-			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
-		},
-	}
+			ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
+			Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
+		}, gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: api.GatewayClassName,
+				Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+			},
+		}
 }
 
 func httpBackendRef(name string, namespace gatewayv1.Namespace, port gatewayv1.PortNumber) gatewayv1.HTTPBackendRef {

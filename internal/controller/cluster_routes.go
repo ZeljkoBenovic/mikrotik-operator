@@ -115,7 +115,7 @@ func desiredClusterRouteCandidates(ctx context.Context, request clusterRouteReco
 		if service.Spec.ClusterIP == "" || service.Spec.ClusterIP == corev1.ClusterIPNone {
 			continue
 		}
-		gateways, err := clusterRouteGateways(ctx, request.kube, service, request.routerRef)
+		gateways, err := clusterRouteGateways(ctx, request.kube, service, request.namespace, request.routerRef)
 		if err != nil {
 			return nil, err
 		}
@@ -142,30 +142,45 @@ func clusterRouteGateways(
 	ctx context.Context,
 	kube client.Client,
 	service corev1.Service,
+	ownerNamespace string,
 	routerRef string,
 ) ([]string, error) {
-	gateways, err := routeGateways(ctx, kube, service)
-	if err != nil {
-		return nil, err
-	}
 	if routerRef == "" {
-		return gateways, nil
+		return routeGateways(ctx, kube, service)
 	}
+	key := routerKeyFromRef(ownerNamespace, routerRef)
 	var router api.MikroTikRouter
-	if err := kube.Get(ctx, routerKeyFromRef(service.Namespace, routerRef), &router); err != nil {
+	if err := kube.Get(ctx, key, &router); err != nil {
 		if apierrors.IsNotFound(err) {
-			return gateways, nil
+			return nil, fmt.Errorf("MikroTikRouter %s/%s not found: %w", key.Namespace, key.Name, err)
 		}
 		return nil, err
 	}
-	if router.Spec.RouteGateway != "" {
-		return []string{router.Spec.RouteGateway}, nil
+	if gateways := configuredRouteGateways(router); len(gateways) > 0 {
+		return gateways, nil
 	}
+	return routeGateways(ctx, kube, service)
+}
+
+func configuredRouteGateways(router api.MikroTikRouter) []string {
 	endpoints := routerEndpoints(router)
-	if len(endpoints) == 1 && endpoints[0].RouteGateway != "" {
-		return []string{endpoints[0].RouteGateway}, nil
+	gateways := make([]string, 0, len(endpoints))
+	seen := make(map[string]struct{}, len(endpoints))
+	for _, endpoint := range endpoints {
+		gateway := endpoint.RouteGateway
+		if gateway == "" {
+			gateway = router.Spec.RouteGateway
+		}
+		if gateway == "" {
+			continue
+		}
+		if _, exists := seen[gateway]; exists {
+			continue
+		}
+		seen[gateway] = struct{}{}
+		gateways = append(gateways, gateway)
 	}
-	return gateways, nil
+	return gateways
 }
 
 func clusterRouteSourceValue(namespace, sourceName string) string {

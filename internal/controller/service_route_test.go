@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 func TestServiceDNSReconcilerCreatesOwnedRouteCRsWithoutRouterOS(t *testing.T) {
@@ -188,6 +189,37 @@ func TestServiceDNSReconcilerDeletesRoutesOnServiceDeletion(t *testing.T) {
 	}
 	if got := ownedRoutes(t, kube, &service); len(got) != 0 {
 		t.Fatalf("owned route CRs remained after Service deletion: %#v", got)
+	}
+}
+
+func TestServiceDNSReconcilerDeletesRoutesAndStripsLeftoverFinalizerWithoutGateways(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service, _, _ := annotatedClusterIPFixture()
+	now := metav1.Now()
+	service.Finalizers = []string{serviceRouteFinalizer}
+	service.DeletionTimestamp = &now
+	owned := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "rt-leftover", Namespace: service.Namespace},
+		Spec:       api.MikroTikRouteSpec{Destination: "10.0.0.8/32", Gateway: "192.0.2.10"},
+	}
+	if err := controllerutil.SetControllerReference(&service, &owned, scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &owned).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(service.Namespace, service.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if got := ownedRoutes(t, kube, &service); len(got) != 0 {
+		t.Fatalf("owned route CRs remained after Service deletion: %#v", got)
+	}
+	var stored corev1.Service
+	err := kube.Get(context.Background(), types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, &stored)
+	if client.IgnoreNotFound(err) != nil {
+		t.Fatal(err)
+	}
+	if err == nil && controllerutil.ContainsFinalizer(&stored, serviceRouteFinalizer) {
+		t.Fatal("leftover service-route finalizer was not stripped")
 	}
 }
 

@@ -888,22 +888,23 @@ func (s *ServiceDNSReconciler) cleanupGeneratedChildren(ctx context.Context, ser
 	}); err != nil {
 		cleanupErrors = append(cleanupErrors, err)
 	}
-	if err := s.reconcileServiceClusterRoutes(ctx, service, ""); err != nil {
+	if err := s.deleteOwnedServiceClusterRoutes(ctx, service); err != nil {
 		cleanupErrors = append(cleanupErrors, err)
 	}
 	return errors.Join(append([]error{cause}, cleanupErrors...)...)
 }
 
 func (s *ServiceDNSReconciler) reconcileServiceDeletion(ctx context.Context, service *corev1.Service) (reconcile.Result, error) {
-	if err := s.reconcileServiceClusterRoutes(ctx, service, ""); err != nil {
-		return reconcile.Result{}, err
-	}
+	routeErr := s.deleteOwnedServiceClusterRoutes(ctx, service)
 	if !controllerutil.ContainsFinalizer(service, serviceRouteFinalizer) {
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, routeErr
 	}
 	controllerutil.RemoveFinalizer(service, serviceRouteFinalizer)
 	delete(service.Annotations, serviceRouteRouterAnnotation)
-	return reconcile.Result{}, s.Update(ctx, service)
+	if err := s.Update(ctx, service); err != nil {
+		return reconcile.Result{}, errors.Join(routeErr, err)
+	}
+	return reconcile.Result{}, routeErr
 }
 
 func serviceRouteRouterRefs(service corev1.Service, record *api.MikroTikDNSRecord) []string {
@@ -2495,15 +2496,23 @@ func (s *ServiceDNSReconciler) resolveRouterRef(ctx context.Context, service cor
 }
 
 func (s *ServiceDNSReconciler) reconcileServiceClusterRoutes(ctx context.Context, service *corev1.Service, routerRef string) error {
-	scheme := s.RuntimeScheme
-	if scheme == nil {
-		scheme = s.Scheme()
-	}
 	services := make([]corev1.Service, 0, 1)
 	if serviceWantsClusterRoute(*service) {
 		services = append(services, *service)
 	}
-	return reconcileOwnedClusterRoutes(ctx, clusterRouteReconcileRequest{
+	return reconcileOwnedClusterRoutes(ctx, s.ownedClusterRouteRequest(service, routerRef, services))
+}
+
+func (s *ServiceDNSReconciler) deleteOwnedServiceClusterRoutes(ctx context.Context, service *corev1.Service) error {
+	return reconcileOwnedClusterRoutes(ctx, s.ownedClusterRouteRequest(service, "", nil))
+}
+
+func (s *ServiceDNSReconciler) ownedClusterRouteRequest(service *corev1.Service, routerRef string, services []corev1.Service) clusterRouteReconcileRequest {
+	scheme := s.RuntimeScheme
+	if scheme == nil {
+		scheme = s.Scheme()
+	}
+	return clusterRouteReconcileRequest{
 		kube:       s.Client,
 		scheme:     scheme,
 		owner:      service,
@@ -2511,7 +2520,7 @@ func (s *ServiceDNSReconciler) reconcileServiceClusterRoutes(ctx context.Context
 		namespace:  service.Namespace,
 		routerRef:  routerRef,
 		services:   services,
-	})
+	}
 }
 
 func serviceWantsClusterRoute(service corev1.Service) bool {
