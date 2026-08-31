@@ -7,6 +7,11 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Admin UI service and pod refs use searchable namespace-then-name
+  dropdowns, backed by name-only list APIs.
+
 ## [0.2.0] - 2026-08-31
 
 ### Added

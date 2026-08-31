@@ -76,6 +76,8 @@ func TestInvalidPathValuesRejected(t *testing.T) {
 		{name: "list namespace uppercase", method: http.MethodGet, path: "/api/resources/mikrotikrouters?namespace=App"},
 		{name: "list namespace underscore", method: http.MethodGet, path: "/api/resources/mikrotikrouters?namespace=web_app"},
 		{name: "secrets invalid namespace", method: http.MethodGet, path: "/api/secrets/App"},
+		{name: "services invalid namespace", method: http.MethodGet, path: "/api/services/App"},
+		{name: "pods invalid namespace", method: http.MethodGet, path: "/api/pods/web_app"},
 		{name: "get invalid namespace", method: http.MethodGet, path: "/api/resources/mikrotikrouters/App/edge"},
 		{name: "get invalid name", method: http.MethodGet, path: "/api/resources/mikrotikrouters/app/Edge_1"},
 		{name: "create invalid namespace", method: http.MethodPost, path: "/api/resources/mikrotikrouters/App", body: `{"metadata":{"name":"edge"},"spec":{"address":"192.0.2.10","credentialsSecret":{"name":"creds"}}}`},

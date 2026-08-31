@@ -57,6 +57,8 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/config", h.config)
 	mux.HandleFunc("GET /api/namespaces", h.listNamespaces)
 	mux.HandleFunc("GET /api/secrets/{namespace}", h.listSecrets)
+	mux.HandleFunc("GET /api/services/{namespace}", h.listServices)
+	mux.HandleFunc("GET /api/pods/{namespace}", h.listPods)
 	mux.HandleFunc("GET /api/resources/{kind}", h.listResources)
 	mux.HandleFunc("GET /api/resources/{kind}/{namespace}/{name}", h.getResource)
 	mux.HandleFunc("POST /api/resources/{kind}/{namespace}", h.createResource)
@@ -139,19 +141,39 @@ func (h *handler) listNamespaces(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) listSecrets(w http.ResponseWriter, r *http.Request) {
+	h.listNamespacedNames(w, r, &corev1.SecretList{})
+}
+
+func (h *handler) listServices(w http.ResponseWriter, r *http.Request) {
+	h.listNamespacedNames(w, r, &corev1.ServiceList{})
+}
+
+func (h *handler) listPods(w http.ResponseWriter, r *http.Request) {
+	h.listNamespacedNames(w, r, &corev1.PodList{})
+}
+
+func (h *handler) listNamespacedNames(w http.ResponseWriter, r *http.Request, list client.ObjectList) {
 	namespace := r.PathValue("namespace")
 	if !validKubeName(namespace) {
 		writeError(w, http.StatusBadRequest, "invalid namespace")
 		return
 	}
-	var list corev1.SecretList
-	if err := h.kube.List(r.Context(), &list, client.InNamespace(namespace)); err != nil {
+	if err := h.kube.List(r.Context(), list, client.InNamespace(namespace)); err != nil {
 		h.writeKubeError(w, err)
 		return
 	}
-	items := make([]nameItem, 0, len(list.Items))
-	for _, secret := range list.Items {
-		items = append(items, nameItem{Name: secret.Name})
+	objects, err := objectsFromList(list)
+	if err != nil {
+		h.log.ErrorContext(r.Context(), "extract name list", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	items := make([]nameItem, 0, len(objects))
+	for _, obj := range objects {
+		if !obj.GetDeletionTimestamp().IsZero() {
+			continue
+		}
+		items = append(items, nameItem{Name: obj.GetName()})
 	}
 	writeJSON(w, http.StatusOK, namesResponse{Items: items})
 }
