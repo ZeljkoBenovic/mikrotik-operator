@@ -149,6 +149,35 @@ describe('form conversion', () => {
     expect(body.spec.confirm).toBe('RESTORE')
   })
 
+  it('keeps omitted restore connection tls false when converting an existing resource', () => {
+    const restore = KINDS[6]
+    const from = formFromResource(restore, {
+      metadata: { name: 'bare', namespace: 'app' },
+      spec: {
+        backupRef: { name: 'once' },
+        connection: { address: '192.0.2.88', credentialsSecret: { name: 'creds' } },
+      },
+    } as ResourceObject)
+    expect(from.spec.targetType).toBe('connection')
+    expect((from.spec.connection as { tls?: boolean }).tls).not.toBe(true)
+
+    const body = resourceFromForm(
+      restore,
+      {
+        name: 'bare',
+        namespace: 'app',
+        spec: {
+          targetType: 'connection',
+          backupRef: { name: 'once' },
+          connection: { address: '192.0.2.88', credentialsSecret: { name: 'creds' }, tls: false },
+        },
+      },
+      'edit',
+    )
+    expect(body.spec.connection).toMatchObject({ address: '192.0.2.88' })
+    expect((body.spec.connection as { tls?: boolean } | undefined)?.tls).not.toBe(true)
+  })
+
   it('omits backup retention unless schedule mode', () => {
     const backup = KINDS[5]
     const once = resourceFromForm(backup, {

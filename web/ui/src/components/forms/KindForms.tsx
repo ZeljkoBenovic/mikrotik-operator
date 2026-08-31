@@ -452,7 +452,12 @@ export function RestoreForm({ createMode }: FormCommonProps) {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name={['spec', 'connection', 'tls']} label="TLS" valuePropName="checked" initialValue={true}>
+              <Form.Item
+                name={['spec', 'connection', 'tls']}
+                label="TLS"
+                valuePropName="checked"
+                initialValue={createMode ? true : undefined}
+              >
                 <Switch />
               </Form.Item>
             </Col>

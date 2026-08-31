@@ -206,4 +206,32 @@ describe('ResourceDetail', () => {
       expect(body.spec.confirm).toBe('RESTORE')
     })
   })
+
+  it('disables edit on an applied restore', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/api/resources/mikrotikrestores/app/bring-up')) {
+          return jsonResponse(
+            restoreResource({
+              spec: { backupRef: { name: 'once' }, routerRef: 'edge', confirm: 'RESTORE' },
+              status: { applied: true, conditions: [{ type: 'Ready', status: 'True', reason: 'Applied' }] },
+            }),
+          )
+        }
+        return jsonResponse({})
+      }),
+    )
+    renderWithProviders(<ResourceDetail kind={restoreKind} />, {
+      route: '/restores/app/bring-up',
+      path: '/restores/:namespace/:name',
+    })
+    expect(await screen.findByText('bring-up')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /delete/i })).toBeEnabled()
+    })
+    expect(screen.getByRole('button', { name: /edit/i })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /confirm restore/i })).not.toBeInTheDocument()
+  })
 })

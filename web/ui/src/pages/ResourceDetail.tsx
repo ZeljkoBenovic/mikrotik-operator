@@ -13,7 +13,7 @@ import { YamlEditor } from '../components/YamlEditor'
 import type { KindConfig } from '../kinds'
 import { errorMessage } from '../utils/errors'
 import { liveResourceRefetchInterval } from '../utils/liveQuery'
-import { isManaged, toSubmitBody } from '../utils/resource'
+import { isManaged, isReadOnly, toSubmitBody } from '../utils/resource'
 import { toYAML } from '../utils/yaml'
 
 export function ResourceDetail({ kind }: { kind: KindConfig }) {
@@ -73,7 +73,7 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
 
   const resource = query.data
   const owned = Boolean(resource && isManaged(resource))
-  const restoreApplied = kind.apiKind === 'MikroTikRestore' && Boolean(resource?.status?.applied)
+  const readOnly = Boolean(resource && isReadOnly(resource))
   const yaml = resource
     ? toYAML({
         apiVersion: resource.apiVersion,
@@ -115,7 +115,7 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
           </Space>
         </div>
         <Space>
-          <Button icon={<EditOutlined />} disabled={!resource || owned || restoreApplied} onClick={() => setEditing(true)}>
+          <Button icon={<EditOutlined />} disabled={!resource || readOnly} onClick={() => setEditing(true)}>
             Edit
           </Button>
           {kind.apiKind === 'MikroTikRestore' && resource && resource.spec?.confirm !== 'RESTORE' && !resource.status?.applied ? (

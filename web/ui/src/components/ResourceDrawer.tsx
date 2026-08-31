@@ -6,7 +6,7 @@ import type { ResourceObject } from '../api/types'
 import type { KindConfig } from '../kinds'
 import { errorMessage } from '../utils/errors'
 import { kubernetesNameError, sanitizeKubernetesName } from '../utils/k8sName'
-import { isManaged, toSubmitBody } from '../utils/resource'
+import { isManaged, isReadOnly, toSubmitBody } from '../utils/resource'
 import { fromYAML, toYAML } from '../utils/yaml'
 import { YamlEditor } from './YamlEditor'
 import { emptyForm, emptyResource, formFromResource, resourceFromForm } from './forms/convert'
@@ -44,6 +44,7 @@ export function ResourceDrawer({
   const [yamlText, setYamlText] = useState('')
   const config = useQuery({ queryKey: queryKeys.config, queryFn: api.config })
   const createMode = mode === 'create'
+  const readOnly = Boolean(resource && isReadOnly(resource))
   const owned = Boolean(resource && isManaged(resource))
   const operatorNamespace = config.data || 'default'
   const sessionKey = !open
@@ -141,8 +142,12 @@ export function ResourceDrawer({
   }
 
   async function submit() {
-    if (owned) {
-      message.warning('Owned resources cannot be edited from this UI.')
+    if (readOnly) {
+      message.warning(
+        owned
+          ? 'Owned resources cannot be edited from this UI.'
+          : 'Applied restores cannot be edited from this UI.',
+      )
       return
     }
     try {
@@ -221,7 +226,7 @@ export function ResourceDrawer({
       extra={
         <Space>
           <Typography.Text type="secondary">YAML</Typography.Text>
-          <Switch checked={yamlMode} onChange={toggleYaml} disabled={owned || formLocked} />
+          <Switch checked={yamlMode} onChange={toggleYaml} disabled={readOnly || formLocked} />
         </Space>
       }
       footer={
@@ -231,7 +236,7 @@ export function ResourceDrawer({
             type="primary"
             onClick={() => void submit()}
             loading={mutation.isPending || formLocked}
-            disabled={owned || formLocked}
+            disabled={readOnly || formLocked}
           >
             {mode === 'edit' ? 'Save' : 'Create'}
           </Button>
@@ -242,11 +247,11 @@ export function ResourceDrawer({
         <YamlEditor
           value={yamlText}
           onChange={setYamlText}
-          readOnly={owned || formLocked}
+          readOnly={readOnly || formLocked}
           height="calc(100vh - 220px)"
         />
       ) : (
-        <Form form={form} layout="vertical" requiredMark="optional" disabled={formLocked}>
+        <Form form={form} layout="vertical" requiredMark="optional" disabled={formLocked || readOnly}>
           {kindForm()}
         </Form>
       )}

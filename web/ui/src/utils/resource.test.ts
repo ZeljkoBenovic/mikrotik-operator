@@ -8,6 +8,7 @@ import {
   omitEmpty,
   specSummary,
   toSubmitBody,
+  isAppliedRestore,
 } from './resource'
 
 function resource(partial: Partial<ResourceObject> & Pick<ResourceObject, 'metadata' | 'spec'>): ResourceObject {
@@ -54,6 +55,42 @@ describe('isManaged', () => {
         }),
       ),
     ).toBe(false)
+  })
+})
+
+describe('isAppliedRestore', () => {
+  it('locks only MikroTikRestore objects that already imported', () => {
+    expect(
+      isAppliedRestore(
+        resource({
+          kind: 'MikroTikRestore',
+          metadata: { name: 'bring-up' },
+          spec: {},
+          status: { applied: true },
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      isAppliedRestore(
+        resource({
+          kind: 'MikroTikRestore',
+          metadata: { name: 'bring-up' },
+          spec: {},
+          status: { applied: false },
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      isAppliedRestore(
+        resource({
+          kind: 'MikroTikPortForward',
+          metadata: { name: 'web' },
+          spec: {},
+          status: { applied: true },
+        }),
+      ),
+    ).toBe(false)
+    expect(isAppliedRestore(undefined)).toBe(false)
   })
 })
 

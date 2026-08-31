@@ -44,6 +44,9 @@ export function formFromResource(kind: KindConfig, resource: ResourceObject): Ed
   if (kind.apiKind === 'MikroTikRestore') {
     const connection = asRecord(spec.connection)
     spec.targetType = typeof connection.address === 'string' && connection.address ? 'connection' : 'router'
+    if (spec.targetType === 'connection') {
+      spec.connection = { ...connection, tls: Boolean(connection.tls) }
+    }
   }
   return {
     name: resource.metadata.name,

@@ -10,6 +10,14 @@ export function isManaged(resource: ResourceObject | undefined): boolean {
   return Boolean(resource.metadata.ownerReferences?.some((ref) => ref.controller))
 }
 
+export function isAppliedRestore(resource: ResourceObject | undefined): boolean {
+  return resource?.kind === 'MikroTikRestore' && Boolean(resource.status?.applied)
+}
+
+export function isReadOnly(resource: ResourceObject | undefined): boolean {
+  return isManaged(resource) || isAppliedRestore(resource)
+}
+
 export function managedLabel(resource: ResourceObject): string | undefined {
   const owner = resource.managedBy
   if (owner?.kind && owner.name) {

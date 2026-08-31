@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { queryKeys } from '../api/client'
 import { ResourceDrawer } from './ResourceDrawer'
 import { jsonResponse, renderWithProviders } from '../test/render'
-import { dnsKind, portForward, portForwardKind, routerKind, standaloneRouter } from '../test/fixtures'
+import { dnsKind, portForward, portForwardKind, restoreKind, restoreResource, routerKind, standaloneRouter } from '../test/fixtures'
 
 function stubFetch(routers: ReturnType<typeof standaloneRouter>[] = []) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -591,5 +591,64 @@ describe('ResourceDrawer', () => {
     })
     expect(await screen.findByText('namespaces unavailable')).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: /^service namespace$/i })).toBeEnabled()
+  })
+
+  it('does not save an applied restore from the editor', async () => {
+    stubFetch()
+    const applied = restoreResource({
+      spec: { backupRef: { name: 'once' }, routerRef: 'edge', confirm: 'RESTORE' },
+      status: { applied: true, conditions: [{ type: 'Ready', status: 'True', reason: 'Applied' }] },
+    })
+    renderWithProviders(
+      <ResourceDrawer kind={restoreKind} open mode="edit" resource={applied} onClose={() => {}} />,
+    )
+    expect(await screen.findByText('Edit Restore')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /save/i })).toBeDisabled()
+    expect(yamlSwitch()).toBeDisabled()
+  })
+
+  it('does not enable TLS when editing an inline restore that omitted tls', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/config') {
+        return jsonResponse({ namespace: 'mikrotik-operator-system' })
+      }
+      if (url === '/api/namespaces') {
+        return jsonResponse({ items: [{ name: 'app' }] })
+      }
+      if (url.startsWith('/api/resources/mikrotikrouters') && (!init?.method || init.method === 'GET')) {
+        return jsonResponse({ items: [] })
+      }
+      if (url.startsWith('/api/secrets/')) {
+        return jsonResponse({ items: [{ name: 'empty-router' }] })
+      }
+      if (init?.method === 'PUT') {
+        return jsonResponse(JSON.parse(String(init.body ?? '{}')))
+      }
+      return jsonResponse({ items: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    const resource = restoreResource({
+      spec: {
+        backupRef: { name: 'once' },
+        connection: { address: '192.0.2.88', credentialsSecret: { name: 'empty-router' } },
+      },
+    })
+    renderWithProviders(
+      <ResourceDrawer kind={restoreKind} open mode="edit" resource={resource} onClose={() => {}} />,
+    )
+    expect(await screen.findByLabelText(/^address$/i)).toHaveValue('192.0.2.88')
+    const tlsSwitch = screen.getByRole('switch', { name: /tls/i })
+    expect(tlsSwitch).toHaveAttribute('aria-checked', 'false')
+    await user.click(screen.getByRole('button', { name: /save/i }))
+    await waitFor(() => {
+      const put = fetchMock.mock.calls.find((call) => (call[1] as RequestInit | undefined)?.method === 'PUT')
+      expect(put).toBeTruthy()
+      const body = JSON.parse(String((put?.[1] as RequestInit).body)) as {
+        spec: { connection?: { tls?: boolean } }
+      }
+      expect(body.spec.connection?.tls).not.toBe(true)
+    })
   })
 })
