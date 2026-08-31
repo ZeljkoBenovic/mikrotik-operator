@@ -86,7 +86,7 @@ The chart installs the operator, RBAC, CRDs, probes, and the `mikrotik`
 helm upgrade --install mikrotik-operator ./charts/mikrotik-operator \
   --namespace mikrotik-operator-system \
   --create-namespace \
-  --set image.tag=v0.2.0
+  --set image.tag=v0.3.0
 ```
 
 The raw Kubernetes resources are also available under [`config/`](config/).
