@@ -211,6 +211,7 @@ func (h *handler) listResources(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		stripListStatus(spec.plural, annotated)
 		items = append(items, annotated)
 	}
 	writeJSON(w, http.StatusOK, listResponse{Items: items})
@@ -436,4 +437,15 @@ func pathInside(root, target string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func stripListStatus(kind string, annotated map[string]any) {
+	if kind != kindBackups {
+		return
+	}
+	status, ok := annotated["status"].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(status, "export")
 }

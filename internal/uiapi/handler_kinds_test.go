@@ -106,6 +106,43 @@ func TestCRUDAllKinds(t *testing.T) {
 			want:    "accept",
 			updated: "drop",
 		},
+		{
+			plural: kindBackups,
+			kind:   "MikroTikBackup",
+			name:   "nightly",
+			create: `{
+				"metadata":{"name":"nightly"},
+				"spec":{"routerRef":"edge","schedule":"0 * * * *"}
+			}`,
+			update: `{
+				"metadata":{"name":"nightly"},
+				"spec":{"routerRef":"edge","schedule":"0 2 * * *"}
+			}`,
+			address: func(spec map[string]any) string { return fmt.Sprint(spec["schedule"]) },
+			want:    "0 * * * *",
+			updated: "0 2 * * *",
+		},
+		{
+			plural: kindRestores,
+			kind:   "MikroTikRestore",
+			name:   "bring-up",
+			create: `{
+				"metadata":{"name":"bring-up"},
+				"spec":{"backupRef":{"name":"nightly"},"routerRef":"edge"}
+			}`,
+			update: `{
+				"metadata":{"name":"bring-up"},
+				"spec":{"backupRef":{"name":"nightly"},"routerRef":"edge","confirm":"RESTORE"}
+			}`,
+			address: func(spec map[string]any) string {
+				if spec["confirm"] == nil {
+					return ""
+				}
+				return fmt.Sprint(spec["confirm"])
+			},
+			want:    "",
+			updated: "RESTORE",
+		},
 	}
 
 	for _, tt := range tests {
@@ -240,6 +277,8 @@ func TestOverviewReadyCountsAllKinds(t *testing.T) {
 		kindRoutes:        {Kind: kindRoutes, Count: 1, NotReady: 1},
 		kindPortForwards:  {Kind: kindPortForwards, Count: 1, NotReady: 0},
 		kindFirewallRules: {Kind: kindFirewallRules, Count: 1, NotReady: 1},
+		kindBackups:       {Kind: kindBackups},
+		kindRestores:      {Kind: kindRestores},
 	}
 	for _, raw := range sliceField(t, decodeMap(t, rec), "kinds") {
 		item := asMap(t, raw)
@@ -413,5 +452,50 @@ func notReadyFirewall(namespace, name string) *api.MikroTikFirewallRule {
 				Status: metav1.ConditionFalse,
 			}},
 		},
+	}
+}
+
+func TestListBackupsOmitsExport(t *testing.T) {
+	t.Parallel()
+	export := strings.Repeat("secret-password\n", 70_000)
+	if len(export) < 1<<20 {
+		t.Fatalf("fixture too small: %d", len(export))
+	}
+	backup := &api.MikroTikBackup{
+		ObjectMeta: metav1.ObjectMeta{Name: "once", Namespace: "app"},
+		Spec:       api.MikroTikBackupSpec{RouterRef: "edge"},
+		Status: api.MikroTikBackupStatus{
+			Export:      export,
+			ExportBytes: int64(len(export)),
+			Role:        api.BackupRoleSnapshot,
+		},
+	}
+	h := newTestHandler(t, backup)
+	rec := doRequest(t, h, http.MethodGet, "/api/resources/mikrotikbackups", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "secret-password") {
+		t.Fatal("list JSON included status.export")
+	}
+	items := listItems(t, rec)
+	if len(items) != 1 {
+		t.Fatalf("items = %d", len(items))
+	}
+	status := asMap(t, items[0]["status"])
+	if _, ok := status["export"]; ok {
+		t.Fatal("list item still has status.export")
+	}
+	if status["exportBytes"] == nil {
+		t.Fatal("exportBytes was stripped")
+	}
+
+	getRec := doRequest(t, h, http.MethodGet, "/api/resources/mikrotikbackups/app/once", "")
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status %d %s", getRec.Code, getRec.Body.String())
+	}
+	gotStatus := asMap(t, decodeMap(t, getRec)["status"])
+	if gotStatus["export"] != export {
+		t.Fatal("GET-by-name must still return status.export")
 	}
 }

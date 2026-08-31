@@ -135,6 +135,8 @@ describe('specSummary', () => {
       }),
     ).toBe('TCP :80 → 10.0.0.8:8080')
     expect(specSummary('MikroTikFirewallRule', { chain: 'forward', action: 'accept' })).toBe('forward / accept')
+    expect(specSummary('MikroTikBackup', { routerRef: 'edge' })).toBe('edge (once)')
+    expect(specSummary('MikroTikRestore', { backupRef: { name: 'once' }, routerRef: 'edge' })).toBe('once → edge')
     expect(specSummary('Unknown', {})).toBe('—')
   })
 })

@@ -17,6 +17,9 @@ describe('form conversion', () => {
     })
     expect(emptyForm(forwards, 'app').spec).toMatchObject({ protocol: 'tcp', targetType: 'address' })
     expect(emptyForm(firewall, 'app').spec).toMatchObject({ chain: 'forward', action: 'accept' })
+    expect(emptyForm(KINDS[5], 'app').spec).toMatchObject({ backupMode: 'once' })
+    expect(emptyForm(KINDS[5], 'app').spec.retention).toBeUndefined()
+    expect(emptyForm(KINDS[6], 'app').spec).toMatchObject({ targetType: 'router', connection: { tls: true } })
     expect(emptyResource(dns, 'app')).toMatchObject({
       kind: 'MikroTikDNSRecord',
       metadata: { namespace: 'app' },
@@ -107,5 +110,60 @@ describe('form conversion', () => {
       spec: { routers: [{ address: '192.0.2.10' }] },
     } as ResourceObject)
     expect(multi.spec.endpointMode).toBe('multi')
+  })
+
+  it('omits restore confirm and unused target fields', () => {
+    const restore = KINDS[6]
+    const body = resourceFromForm(restore, {
+      name: 'bring-up',
+      namespace: 'app',
+      spec: {
+        targetType: 'router',
+        backupRef: { name: 'once' },
+        routerRef: 'edge',
+        connection: { address: '192.0.2.1', credentialsSecret: { name: 'creds' } },
+        confirm: 'RESTORE',
+      },
+    })
+    expect(body.spec.confirm).toBeUndefined()
+    expect(body.spec.connection).toBeUndefined()
+    expect(body.spec.routerRef).toBe('edge')
+  })
+
+  it('preserves restore confirm on edit', () => {
+    const restore = KINDS[6]
+    const body = resourceFromForm(
+      restore,
+      {
+        name: 'bring-up',
+        namespace: 'app',
+        spec: {
+          targetType: 'router',
+          backupRef: { name: 'once' },
+          routerRef: 'edge',
+          confirm: 'RESTORE',
+        },
+      },
+      'edit',
+    )
+    expect(body.spec.confirm).toBe('RESTORE')
+  })
+
+  it('omits backup retention unless schedule mode', () => {
+    const backup = KINDS[5]
+    const once = resourceFromForm(backup, {
+      name: 'now',
+      namespace: 'app',
+      spec: { backupMode: 'once', routerRef: 'edge', retention: 5, schedule: '0 2 * * *' },
+    })
+    expect(once.spec.retention).toBeUndefined()
+    expect(once.spec.schedule).toBeUndefined()
+    const scheduled = resourceFromForm(backup, {
+      name: 'nightly',
+      namespace: 'app',
+      spec: { backupMode: 'schedule', routerRef: 'edge', retention: 7, schedule: '0 2 * * *' },
+    })
+    expect(scheduled.spec.retention).toBe(7)
+    expect(scheduled.spec.schedule).toBe('0 2 * * *')
   })
 })

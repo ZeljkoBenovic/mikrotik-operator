@@ -55,6 +55,25 @@ export function notReadyRoute(): ResourceObject {
   }
 }
 
+export const restoreKind = KINDS[6]
+
+export function restoreResource(overrides: Partial<ResourceObject> = {}): ResourceObject {
+  return {
+    apiVersion: 'mikrotik.operator.io/v1alpha1',
+    kind: 'MikroTikRestore',
+    metadata: { name: 'bring-up', namespace: 'app', resourceVersion: '1' },
+    spec: {
+      backupRef: { name: 'once' },
+      routerRef: 'edge',
+    },
+    status: {
+      applied: false,
+      conditions: [{ type: 'Ready', status: 'False', reason: 'WaitingForConfirmation' }],
+    },
+    ...overrides,
+  }
+}
+
 export function portForward(overrides: Partial<ResourceObject> = {}): ResourceObject {
   return {
     apiVersion: 'mikrotik.operator.io/v1alpha1',

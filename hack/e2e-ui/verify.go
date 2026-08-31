@@ -73,8 +73,8 @@ func run() error {
 	if !ok {
 		return fmt.Errorf("overview kinds is %T, want array", overview["kinds"])
 	}
-	if len(kinds) != 5 {
-		return fmt.Errorf("overview kinds=%d want 5", len(kinds))
+	if len(kinds) != 7 {
+		return fmt.Errorf("overview kinds=%d want 7", len(kinds))
 	}
 
 	namespaces, err := getJSON(client, base+"/api/namespaces")
@@ -146,6 +146,22 @@ func run() error {
 			body: `{
 				"metadata":{"name":"ui-fw"},
 				"spec":{"routerRef":"ui-edge","chain":"forward","action":"accept","protocol":"tcp","destinationPort":"443"}
+			}`,
+		},
+		{
+			kind: "mikrotikbackups",
+			name: "ui-backup",
+			body: `{
+				"metadata":{"name":"ui-backup"},
+				"spec":{"routerRef":"ui-edge"}
+			}`,
+		},
+		{
+			kind: "mikrotikrestores",
+			name: "ui-restore",
+			body: `{
+				"metadata":{"name":"ui-restore"},
+				"spec":{"backupRef":{"name":"ui-backup"},"routerRef":"ui-edge"}
 			}`,
 		},
 	}

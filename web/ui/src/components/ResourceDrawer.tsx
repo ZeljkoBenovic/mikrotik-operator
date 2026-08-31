@@ -16,6 +16,8 @@ import {
   PortForwardForm,
   RouteForm,
   RouterForm,
+  BackupForm,
+  RestoreForm,
 } from './forms/KindForms'
 
 type ResourceDrawerProps = {
@@ -129,6 +131,10 @@ export function ResourceDrawer({
         return <PortForwardForm createMode={createMode} />
       case 'MikroTikFirewallRule':
         return <FirewallRuleForm createMode={createMode} />
+      case 'MikroTikBackup':
+        return <BackupForm createMode={createMode} />
+      case 'MikroTikRestore':
+        return <RestoreForm createMode={createMode} />
       default:
         return null
     }
@@ -156,6 +162,9 @@ export function ResourceDrawer({
         } else if (!parsed.metadata.namespace) {
           parsed.metadata.namespace = resource?.metadata.namespace || operatorNamespace
         }
+        if (kind.apiKind === 'MikroTikRestore' && parsed.spec && typeof parsed.spec === 'object') {
+          delete (parsed.spec as Record<string, unknown>).confirm
+        }
         await mutation.mutateAsync(parsed)
         return
       }
@@ -164,7 +173,7 @@ export function ResourceDrawer({
         sanitizeKubernetesName(String(form.getFieldValue('name') ?? ''), { finalize: true }),
       )
       const values = await form.validateFields()
-      const body = resourceFromForm(kind, values)
+      const body = resourceFromForm(kind, values, mode)
       if (createMode) {
         body.metadata.namespace = operatorNamespace
       }
@@ -186,7 +195,7 @@ export function ResourceDrawer({
     try {
       if (next) {
         const values = form.getFieldsValue(true)
-        const body = resourceFromForm(kind, values)
+        const body = resourceFromForm(kind, values, mode)
         if (mode === 'edit' && resource) {
           body.metadata.labels = resource.metadata.labels
           body.metadata.annotations = resource.metadata.annotations

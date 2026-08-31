@@ -19,7 +19,8 @@ and the project follows semantic versioning.
   `/export` snapshots (manual or cron with retention) and confirmed `/import`.
   Remote FTP/SMB/S3 storage is reserved and rejected until implemented.
   Chart package version is `0.3.0` (operator `appVersion` remains `v0.2.0`
-  until the next image release).
+  until the next image release). The admin UI lists backups without
+  `status.export` and requires typing `RESTORE` before `/import`.
 
 ### Fixed
 

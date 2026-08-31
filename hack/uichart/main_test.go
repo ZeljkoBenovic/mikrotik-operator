@@ -86,6 +86,8 @@ rules:
   - mikrotikportforwards
   - mikrotikroutes
   - mikrotikfirewallrules
+  - mikrotikbackups
+  - mikrotikrestores
   verbs: [get, list, watch, create, update, patch, delete]
 - apiGroups: [""]
   resources: [secrets]
@@ -174,8 +176,8 @@ func TestValidateClusterRoleRejectsStatusAndPods(t *testing.T) {
 	t.Parallel()
 	manifest := strings.Replace(
 		enabledManifest,
-		"- mikrotikfirewallrules\n  verbs: [get, list, watch, create, update, patch, delete]",
-		"- mikrotikfirewallrules\n  - mikrotikrouters/status\n  verbs: [get, list, watch, create, update, patch, delete]",
+		"- mikrotikfirewallrules\n  - mikrotikbackups\n  - mikrotikrestores\n  verbs: [get, list, watch, create, update, patch, delete]",
+		"- mikrotikfirewallrules\n  - mikrotikbackups\n  - mikrotikrestores\n  - mikrotikrouters/status\n  verbs: [get, list, watch, create, update, patch, delete]",
 		1,
 	)
 	docs, err := decodeDocs([]byte(manifest))

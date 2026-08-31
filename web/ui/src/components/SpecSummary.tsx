@@ -92,6 +92,20 @@ function itemsFor(kind: string, spec: Record<string, unknown>): { label: string;
         { label: 'Log prefix', children: text(spec.logPrefix) },
         { label: 'Place before', children: text(spec.placeBefore) },
       ]
+    case 'MikroTikBackup':
+      return [
+        { label: 'Router', children: text(spec.routerRef) },
+        { label: 'Schedule', children: text(spec.schedule) },
+        { label: 'Retention', children: text(spec.retention) },
+        { label: 'Remote enabled', children: text((spec.remote as { enabled?: boolean } | undefined)?.enabled) },
+      ]
+    case 'MikroTikRestore':
+      return [
+        { label: 'Backup', children: text(spec.backupRef) },
+        { label: 'Router', children: text(spec.routerRef) },
+        { label: 'Inline address', children: text((spec.connection as { address?: string } | undefined)?.address) },
+        { label: 'Confirmed', children: spec.confirm === 'RESTORE' ? 'yes' : 'no' },
+      ]
     default:
       return Object.entries(spec).map(([label, value]) => ({ label, children: text(value) }))
   }

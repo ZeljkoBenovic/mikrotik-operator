@@ -75,6 +75,8 @@ func TestLookupKindKnownPlurals(t *testing.T) {
 		kindRoutes:        "MikroTikRoute",
 		kindPortForwards:  "MikroTikPortForward",
 		kindFirewallRules: "MikroTikFirewallRule",
+		kindBackups:       "MikroTikBackup",
+		kindRestores:      "MikroTikRestore",
 	}
 	for plural, kind := range wantGVK {
 		t.Run(plural, func(t *testing.T) {

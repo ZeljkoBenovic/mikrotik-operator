@@ -99,9 +99,10 @@ The raw Kubernetes resources are also available under [`config/`](config/).
 ## Admin UI
 
 The chart can deploy an optional browser panel for routers, DNS records,
-routes, port forwards, and firewall rules. It is **disabled by default** and
-has **no authentication**. Enable it only on a trusted network or behind an
-authenticating proxy.
+routes, port forwards, firewall rules, backups, and restores. It is
+**disabled by default** and has **no authentication**. Enable it only on a
+trusted network or behind an authenticating proxy. Restores include a
+confirmation dialog before `/import`.
 
 ```sh
 helm upgrade --install mikrotik-operator ./charts/mikrotik-operator \

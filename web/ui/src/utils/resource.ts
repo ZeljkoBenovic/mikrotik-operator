@@ -73,6 +73,10 @@ export function specSummary(kind: string, spec: Record<string, unknown>): string
     }
     case 'MikroTikFirewallRule':
       return `${spec.chain ?? '—'} / ${spec.action ?? '—'}`
+    case 'MikroTikBackup':
+      return spec.schedule ? `${spec.routerRef ?? '—'} @ ${spec.schedule}` : `${spec.routerRef ?? '—'} (once)`
+    case 'MikroTikRestore':
+      return `${(spec.backupRef as { name?: string } | undefined)?.name ?? '—'} → ${spec.routerRef || (spec.connection as { address?: string } | undefined)?.address || '—'}`
     default:
       return '—'
   }

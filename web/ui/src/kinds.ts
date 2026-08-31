@@ -1,8 +1,10 @@
 import {
   ApiOutlined,
+  CloudUploadOutlined,
   ClusterOutlined,
   GlobalOutlined,
   SafetyCertificateOutlined,
+  SaveOutlined,
   SwapOutlined,
 } from '@ant-design/icons'
 import type { ComponentType, CSSProperties } from 'react'
@@ -63,6 +65,24 @@ export const KINDS: KindConfig[] = [
     singular: 'Firewall Rule',
     description: 'Filter table rules with optional placement',
     icon: SafetyCertificateOutlined,
+  },
+  {
+    slug: 'mikrotikbackups',
+    apiKind: 'MikroTikBackup',
+    path: '/backups',
+    label: 'Backups',
+    singular: 'Backup',
+    description: 'RouterOS /export snapshots and backup schedules',
+    icon: SaveOutlined,
+  },
+  {
+    slug: 'mikrotikrestores',
+    apiKind: 'MikroTikRestore',
+    path: '/restores',
+    label: 'Restores',
+    singular: 'Restore',
+    description: 'Confirmed /import of a stored export onto a router',
+    icon: CloudUploadOutlined,
   },
 ]
 

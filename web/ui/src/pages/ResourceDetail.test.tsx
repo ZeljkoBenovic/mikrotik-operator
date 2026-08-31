@@ -1,10 +1,10 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ResourceDetail } from './ResourceDetail'
 import { jsonResponse, renderWithProviders } from '../test/render'
 import { KINDS } from '../kinds'
-import { dnsKind, ownedDNS, portForward } from '../test/fixtures'
+import { dnsKind, ownedDNS, portForward, restoreKind, restoreResource } from '../test/fixtures'
 
 const portForwardKind = KINDS[3]
 
@@ -171,6 +171,39 @@ describe('ResourceDetail', () => {
       }
       expect(body.metadata.resourceVersion).toBe(liveVersion)
       expect(body.metadata.resourceVersion).not.toBe(String(versionAtEdit))
+    })
+  })
+
+  it('confirms a restore only after typing RESTORE', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'PUT') {
+        return jsonResponse(restoreResource({ spec: { backupRef: { name: 'once' }, routerRef: 'edge', confirm: 'RESTORE' } }))
+      }
+      if (url.includes('/api/resources/mikrotikrestores/app/bring-up')) {
+        return jsonResponse(restoreResource())
+      }
+      return jsonResponse({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    renderWithProviders(<ResourceDetail kind={restoreKind} />, {
+      route: '/restores/app/bring-up',
+      path: '/restores/:namespace/:name',
+    })
+    const open = await screen.findByRole('button', { name: /confirm restore/i })
+    await user.click(open)
+    const dialog = await screen.findByRole('dialog')
+    const dialogOk = within(dialog).getByRole('button', { name: 'Confirm restore' })
+    expect(dialogOk).toBeDisabled()
+    await user.type(within(dialog).getByPlaceholderText('RESTORE'), 'RESTORE')
+    expect(dialogOk).toBeEnabled()
+    await user.click(dialogOk)
+    await waitFor(() => {
+      const put = fetchMock.mock.calls.find((call) => (call[1] as RequestInit | undefined)?.method === 'PUT')
+      expect(put).toBeTruthy()
+      const body = JSON.parse(String((put?.[1] as RequestInit).body)) as { spec: { confirm?: string } }
+      expect(body.spec.confirm).toBe('RESTORE')
     })
   })
 })

@@ -8,10 +8,12 @@ redirect_from:
 
 # Admin UI
 
-The operator chart can deploy an optional admin panel for the five MikroTik
-custom resources: routers, DNS records, routes, port forwards, and firewall
-rules. The UI lists objects across namespaces, shows status conditions, and
-lets you create, edit, or delete standalone resources. New resources are
+The operator chart can deploy an optional admin panel for MikroTik custom
+resources: routers, DNS records, routes, port forwards, firewall rules,
+backups, and restores. The UI lists objects across namespaces, shows status
+conditions, and lets you create, edit, or delete standalone resources. Restore
+objects include a confirmation dialog that sets `spec.confirm: RESTORE` before
+`/import` runs. New resources are
 always created in the operator namespace; the create form does not offer a
 namespace picker. The header filter still lists existing objects across
 namespaces, including generated resources owned by Services in other
@@ -102,7 +104,11 @@ for scripts and routes. `make e2e-ui-test` starts k3d, installs the chart
 with the UI enabled, and exercises create/update/delete over HTTP. It does
 not start RouterOS.
 
-The backend allowlists five kinds (`mikrotikrouters`, `mikrotikdnsrecords`,
-`mikrotikroutes`, `mikrotikportforwards`, `mikrotikfirewallrules`). Secret,
+The backend allowlists seven kinds (`mikrotikrouters`, `mikrotikdnsrecords`,
+`mikrotikroutes`, `mikrotikportforwards`, `mikrotikfirewallrules`,
+`mikrotikbackups`, `mikrotikrestores`). Secret,
 Service, and Pod list endpoints return names only. Update and delete of owned
-objects return HTTP 409 with a `managedBy` body.
+objects return HTTP 409 with a `managedBy` body. List responses omit
+`status.export`; fetch a backup by name to download the script. YAML
+create/update of a Restore in the UI drops `spec.confirm` — confirm from the
+resource page or with kubectl.
