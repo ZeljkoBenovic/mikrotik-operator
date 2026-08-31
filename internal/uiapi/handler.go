@@ -24,12 +24,14 @@ type Options struct {
 	Client    client.Client
 	Logger    *slog.Logger
 	StaticDir string
+	Namespace string
 }
 
 type handler struct {
 	kube      client.Client
 	log       *slog.Logger
 	staticDir string
+	namespace string
 }
 
 // New returns the UI HTTP handler (API + optional SPA static files).
@@ -38,15 +40,21 @@ func New(opts Options) http.Handler {
 	if log == nil {
 		log = slog.Default()
 	}
+	namespace := opts.Namespace
+	if namespace == "" {
+		namespace = "default"
+	}
 	h := &handler{
 		kube:      opts.Client,
 		log:       log,
 		staticDir: opts.StaticDir,
+		namespace: namespace,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", h.healthz)
 	mux.HandleFunc("GET /readyz", h.readyz)
 	mux.HandleFunc("GET /api/overview", h.overview)
+	mux.HandleFunc("GET /api/config", h.config)
 	mux.HandleFunc("GET /api/namespaces", h.listNamespaces)
 	mux.HandleFunc("GET /api/secrets/{namespace}", h.listSecrets)
 	mux.HandleFunc("GET /api/resources/{kind}", h.listResources)
@@ -81,6 +89,10 @@ func (h *handler) readyz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writePlain(w, r, "ok")
+}
+
+func (h *handler) config(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, configResponse{Namespace: h.namespace})
 }
 
 func (h *handler) overview(w http.ResponseWriter, r *http.Request) {

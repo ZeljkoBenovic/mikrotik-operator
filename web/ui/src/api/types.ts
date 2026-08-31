@@ -222,6 +222,10 @@ export type SecretsResponse = {
   secrets?: unknown
 }
 
+export type ConfigResponse = {
+  namespace?: string
+}
+
 export type ApiErrorBody = {
   message?: string
   error?: string

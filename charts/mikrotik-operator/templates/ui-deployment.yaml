@@ -30,6 +30,7 @@ spec:
         args:
         - "-bind-address=:{{ .Values.ui.service.port }}"
         - "-static-dir=/ui"
+        - "-namespace={{ .Release.Namespace }}"
         securityContext:
           {{- toYaml .Values.containerSecurityContext | nindent 10 }}
         ports:

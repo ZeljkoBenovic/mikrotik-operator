@@ -97,4 +97,5 @@ pf_pid=$!
 echo "Running Admin UI HTTP verification..."
 E2E_UI_BASE_URL="http://127.0.0.1:${LOCAL_PORT}" \
   E2E_UI_NAMESPACE="$WORKLOAD_NS" \
+  E2E_UI_OPERATOR_NAMESPACE="$NAMESPACE" \
   go run -buildvcs=false ./hack/e2e-ui

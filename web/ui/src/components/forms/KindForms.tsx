@@ -1,7 +1,6 @@
 import { AutoComplete, Button, Checkbox, Col, Form, Input, InputNumber, Radio, Row, Space, Switch } from 'antd'
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import {
-  NamespaceSelect,
   RouterRefSelect,
   SecretNameSelect,
 } from './shared'
@@ -13,34 +12,28 @@ import {
 } from './options'
 
 type FormCommonProps = {
-  namespaces: string[]
-  namespacesLoading?: boolean
   createMode: boolean
 }
 
-function MetaFields({ namespaces, namespacesLoading, createMode }: FormCommonProps) {
+function MetaFields({ createMode }: FormCommonProps) {
   return (
     <>
       <Form.Item name="name" label="Name" rules={[{ required: true, message: 'Name is required' }]}>
         <Input disabled={!createMode} placeholder="resource name" />
       </Form.Item>
-      <Form.Item
-        name="namespace"
-        label="Namespace"
-        rules={[{ required: true, message: 'Namespace is required' }]}
-      >
-        <NamespaceSelect namespaces={namespaces} loading={namespacesLoading} disabled={!createMode} />
+      <Form.Item name="namespace" hidden>
+        <Input />
       </Form.Item>
     </>
   )
 }
 
-export function RouterForm({ namespaces, namespacesLoading, createMode }: FormCommonProps) {
+export function RouterForm({ createMode }: FormCommonProps) {
   const namespace = Form.useWatch('namespace') as string | undefined
   const mode = Form.useWatch(['spec', 'endpointMode']) as string | undefined
   return (
     <>
-      <MetaFields namespaces={namespaces} namespacesLoading={namespacesLoading} createMode={createMode} />
+      <MetaFields createMode={createMode} />
       <Form.Item name={['spec', 'endpointMode']} label="Endpoints" initialValue="single">
         <Radio.Group>
           <Radio.Button value="single">Single</Radio.Button>
@@ -153,11 +146,11 @@ export function RouterForm({ namespaces, namespacesLoading, createMode }: FormCo
   )
 }
 
-export function DNSRecordForm({ namespaces, namespacesLoading, createMode }: FormCommonProps) {
+export function DNSRecordForm({ createMode }: FormCommonProps) {
   const namespace = Form.useWatch('namespace') as string | undefined
   return (
     <>
-      <MetaFields namespaces={namespaces} namespacesLoading={namespacesLoading} createMode={createMode} />
+      <MetaFields createMode={createMode} />
       <Form.Item name={['spec', 'routerRef']} label="Router ref">
         <RouterRefSelect namespace={namespace} />
       </Form.Item>
@@ -194,11 +187,11 @@ export function DNSRecordForm({ namespaces, namespacesLoading, createMode }: For
   )
 }
 
-export function RouteForm({ namespaces, namespacesLoading, createMode }: FormCommonProps) {
+export function RouteForm({ createMode }: FormCommonProps) {
   const namespace = Form.useWatch('namespace') as string | undefined
   return (
     <>
-      <MetaFields namespaces={namespaces} namespacesLoading={namespacesLoading} createMode={createMode} />
+      <MetaFields createMode={createMode} />
       <Form.Item name={['spec', 'routerRef']} label="Router ref">
         <RouterRefSelect namespace={namespace} />
       </Form.Item>
@@ -223,12 +216,12 @@ export function RouteForm({ namespaces, namespacesLoading, createMode }: FormCom
   )
 }
 
-export function PortForwardForm({ namespaces, namespacesLoading, createMode }: FormCommonProps) {
+export function PortForwardForm({ createMode }: FormCommonProps) {
   const namespace = Form.useWatch('namespace') as string | undefined
   const targetType = Form.useWatch(['spec', 'targetType']) as string | undefined
   return (
     <>
-      <MetaFields namespaces={namespaces} namespacesLoading={namespacesLoading} createMode={createMode} />
+      <MetaFields createMode={createMode} />
       <Form.Item
         name={['spec', 'routerRef']}
         label="Router ref"
@@ -336,11 +329,11 @@ export function PortForwardForm({ namespaces, namespacesLoading, createMode }: F
   )
 }
 
-export function FirewallRuleForm({ namespaces, namespacesLoading, createMode }: FormCommonProps) {
+export function FirewallRuleForm({ createMode }: FormCommonProps) {
   const namespace = Form.useWatch('namespace') as string | undefined
   return (
     <>
-      <MetaFields namespaces={namespaces} namespacesLoading={namespacesLoading} createMode={createMode} />
+      <MetaFields createMode={createMode} />
       <Form.Item name={['spec', 'routerRef']} label="Router ref">
         <RouterRefSelect namespace={namespace} />
       </Form.Item>

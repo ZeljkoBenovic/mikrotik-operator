@@ -146,7 +146,6 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
         open={Boolean(drawer)}
         mode={drawer?.mode ?? 'create'}
         resource={drawer?.resource}
-        defaultNamespace={namespaceFilter || 'default'}
         onClose={() => setDrawer(null)}
       />
     </>

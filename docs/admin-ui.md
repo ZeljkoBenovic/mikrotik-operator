@@ -8,7 +8,11 @@ title: Admin UI
 The operator chart can deploy an optional admin panel for the five MikroTik
 custom resources: routers, DNS records, routes, port forwards, and firewall
 rules. The UI lists objects across namespaces, shows status conditions, and
-lets you create, edit, or delete standalone resources.
+lets you create, edit, or delete standalone resources. New resources are
+always created in the operator namespace; the create form does not offer a
+namespace picker. The header filter still lists existing objects across
+namespaces, including generated resources owned by Services in other
+namespaces.
 
 The panel is disabled by default.
 

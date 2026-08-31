@@ -143,7 +143,6 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
         open={editing}
         mode="edit"
         resource={resource}
-        defaultNamespace={namespace}
         onClose={() => setEditing(false)}
       />
     </>
