@@ -7,6 +7,8 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-01
+
 ### Added
 
 - Optional `spec.destinationAddress` on `MikroTikPortForward` sets RouterOS
@@ -20,6 +22,13 @@ and the project follows semantic versioning.
 
 - Admin UI shell fills the viewport height, and owned-resource labels
   ellipsize instead of overlapping row actions.
+
+### Changed
+
+- Default operator and admin UI image tag is `v0.3.0` (`Chart.yaml`
+  `appVersion`). Chart package version is `0.3.0`.
+- Public docs use a dark VitePress-styled GitHub Pages theme, with refreshed
+  Admin UI screenshots.
 
 ## [0.2.0] - 2026-08-31
 
