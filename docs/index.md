@@ -22,6 +22,8 @@ only changes RouterOS entries created and labeled by this operator.
 - [Optional admin UI](admin-ui.md)
 - [Resource and annotation reference](reference.md)
 - [Architecture and ownership model](architecture.md)
+- [How the operator works](how-it-works.md)
+- [Troubleshooting](troubleshooting.md)
 
 ## What it manages
 

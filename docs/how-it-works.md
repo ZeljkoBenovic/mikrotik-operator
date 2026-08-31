@@ -1,27 +1,45 @@
+---
+layout: default
+title: How the operator works
+---
+
 # How the operator works
 
 The operator watches Kubernetes resources and translates their desired state
 into RouterOS API operations. Each `MikroTikRouter` supplies one or more
 RouterOS endpoints and references a Kubernetes Secret containing `username`
-and `password` values.
+and `password` values. Secrets are read from the router object's namespace.
 
 ## Reconciliation flow
 
 1. A controller reads the Kubernetes resource and its dependencies.
-2. The controller resolves the target router. A local router in the resource
-   namespace is preferred. If that namespace has none, a unique live router
-   anywhere in the cluster is selected. Ambiguous cases require an explicit
-   `routerRef` or `mikrotik.operator.io/router-ref` value (`name` or
-   `namespace/name`).
+2. The controller resolves the target router. A unique non-deleting router in
+   the resource namespace is preferred. If that namespace has none, a unique
+   non-deleting router anywhere in the cluster is selected. Ambiguous cases
+   require an explicit `routerRef` or `mikrotik.operator.io/router-ref` value
+   (`name` or `namespace/name`). A name-only ref is tried locally first, then
+   as a unique cluster-wide name match.
 3. It calculates the desired DNS, route, NAT, or firewall entries.
 4. The RouterOS client reads entries carrying the operator's managed comment.
 5. It applies only missing or changed entries and removes stale entries owned
    by that resource.
 6. The controller records observed state in the resource status and retries
-   transient failures.
+   transient failures. Successful applies requeue after about one minute for
+   drift repair; connection and apply failures requeue after one minute.
 
 Existing RouterOS entries without the operator's managed comment are never
 modified or deleted.
+
+Managed writes wait until `ensureRouterActive` succeeds: the router is not
+deleting, has the `mikrotik.operator.io/managed-config` finalizer, has
+durable `status.appliedEndpoints` matching the current spec, and uniquely
+owns those endpoints. Endpoint identity is address, port, and TLS — not the
+endpoint display name or Secret name — so credential rotation does not wipe
+managed rules.
+
+In-process fences serialize RouterOS operations per router. The Helm chart
+enables leader election (`LeaderElectionID` `mikrotik-operator`); multiple
+manager replicas without leader election are not supported.
 
 ## Controllers
 
@@ -52,4 +70,5 @@ For a new managed RouterOS capability, update the API type and deepcopy code,
 CRDs, RouterOS client interface and implementation, controller setup/RBAC,
 Helm and raw manifests if needed, examples, documentation, and tests. Keep
 the desired-state operation idempotent and add a stable managed-comment
-namespace before implementing reconciliation.
+namespace before implementing reconciliation. Copy CRD YAML to both
+`config/crd/bases` and `charts/mikrotik-operator/crds`.
