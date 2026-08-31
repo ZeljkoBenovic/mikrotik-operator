@@ -706,15 +706,15 @@ func ingressRuleForService(host, service string, port int32) networkingv1.Ingres
 
 func mikroTikGatewayFixture() (gatewayv1.GatewayClass, gatewayv1.Gateway) {
 	return gatewayv1.GatewayClass{
-			ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
-			Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
-		}, gatewayv1.Gateway{
-			ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
-			Spec: gatewayv1.GatewaySpec{
-				GatewayClassName: api.GatewayClassName,
-				Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
-			},
-		}
+		ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
+		Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
+	}, gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+		Spec: gatewayv1.GatewaySpec{
+			GatewayClassName: api.GatewayClassName,
+			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+		},
+	}
 }
 
 func httpBackendRef(name string, namespace gatewayv1.Namespace, port gatewayv1.PortNumber) gatewayv1.HTTPBackendRef {
