@@ -99,7 +99,13 @@ func (a *apiClient) Import(ctx context.Context, script string) error {
 
 func (a *apiClient) importViaFile(ctx context.Context, script string) error {
 	for _, name := range restoreFileNames() {
-		_ = a.removeFileByName(ctx, name)
+		if err := a.removeFileByName(ctx, name); err != nil {
+			return fmt.Errorf("remove leftover restore file %q: %w", name, err)
+		}
+	}
+	chunks, err := splitRestoreScript(script, maxRestoreFileContentsBytes)
+	if err != nil {
+		return err
 	}
 	createReply, err := a.runArgsContextTimeout(ctx, routerOSBackupTimeout, []string{
 		"/file/print",
@@ -115,28 +121,197 @@ func (a *apiClient) importViaFile(ctx context.Context, script string) error {
 			return err
 		}
 	}
-	if _, err := a.runArgsContextTimeout(ctx, routerOSBackupTimeout, []string{
-		"/file/set",
-		"=.id=" + fileID,
-		"=contents=" + script,
-	}); err != nil {
-		return fmt.Errorf("write restore file: %w", err)
+	var importErr error
+	for i, chunk := range chunks {
+		if _, err := a.runArgsContextTimeout(ctx, routerOSBackupTimeout, []string{
+			"/file/set",
+			"=.id=" + fileID,
+			"=contents=" + chunk,
+		}); err != nil {
+			importErr = fmt.Errorf("write restore file chunk %d: %w", i+1, err)
+			break
+		}
+		if _, err := a.runArgsContextTimeout(ctx, routerOSBackupTimeout, []string{
+			"/import",
+			"=file-name=" + fileName,
+		}); err != nil {
+			importErr = fmt.Errorf("run /import chunk %d: %w", i+1, err)
+			break
+		}
 	}
-	_, importErr := a.runArgsContextTimeout(ctx, routerOSBackupTimeout, []string{
-		"/import",
-		"=file-name=" + fileName,
-	})
 	removeErr := a.removeFileByName(ctx, fileName)
 	if importErr != nil {
 		if removeErr != nil {
-			return fmt.Errorf("run /import: %w; remove restore file: %v", importErr, removeErr)
+			return fmt.Errorf("%w; remove restore file: %v", importErr, removeErr)
 		}
-		return fmt.Errorf("run /import: %w", importErr)
+		return importErr
 	}
 	if removeErr != nil {
 		return fmt.Errorf("remove restore file: %w", removeErr)
 	}
 	return nil
+}
+
+func splitRestoreScript(script string, maxBytes int) ([]string, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("restore chunk size must be positive")
+	}
+	statements, err := restoreStatements(script)
+	if err != nil {
+		return nil, err
+	}
+	chunks := make([]string, 0, 1)
+	var current strings.Builder
+	currentPath := ""
+	chunkHasPath := false
+	flush := func() {
+		if current.Len() == 0 {
+			return
+		}
+		chunks = append(chunks, ensureTrailingNewline(current.String()))
+		current.Reset()
+		chunkHasPath = false
+	}
+	for i := 0; i < len(statements); i++ {
+		stmt := statements[i]
+		piece := ensureTrailingNewline(stmt)
+		isPath := restorePathLine(stmt)
+		if isPath {
+			currentPath = strings.TrimSpace(firstRestoreLine(stmt))
+		}
+		addition := piece
+		if !chunkHasPath && currentPath != "" && !isPath && !restoreCommentLine(stmt) {
+			addition = ensureTrailingNewline(currentPath) + piece
+		}
+		if len(addition) > maxBytes {
+			return nil, fmt.Errorf("restore statement exceeds %d-byte RouterOS file contents limit", maxBytes)
+		}
+		if current.Len()+len(addition) > maxBytes {
+			flush()
+			i--
+			continue
+		}
+		current.WriteString(addition)
+		if isPath || (currentPath != "" && !restoreCommentLine(stmt)) {
+			chunkHasPath = true
+		}
+	}
+	flush()
+	if len(chunks) == 0 {
+		return nil, fmt.Errorf("empty script")
+	}
+	return chunks, nil
+}
+
+func restoreStatements(script string) ([]string, error) {
+	normalized := strings.ReplaceAll(script, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	lines := strings.Split(normalized, "\n")
+	statements := make([]string, 0, len(lines))
+	var current strings.Builder
+	var quote byte
+	braceDepth := 0
+	for _, line := range lines {
+		if current.Len() > 0 {
+			current.WriteByte('\n')
+		}
+		current.WriteString(line)
+		quote, braceDepth = scanRestoreLine(line, quote, braceDepth)
+		continued := quote == 0 && strings.HasSuffix(strings.TrimRight(line, " \t"), `\`)
+		if quote != 0 || braceDepth > 0 || continued {
+			continue
+		}
+		stmt := current.String()
+		current.Reset()
+		if strings.TrimSpace(stmt) == "" {
+			continue
+		}
+		statements = append(statements, stmt)
+	}
+	if quote != 0 || braceDepth > 0 {
+		return nil, fmt.Errorf("unterminated restore script statement")
+	}
+	if strings.TrimSpace(current.String()) != "" {
+		statements = append(statements, current.String())
+	}
+	return statements, nil
+}
+
+func scanRestoreLine(line string, quote byte, braceDepth int) (byte, int) {
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'':
+			quote = c
+		case '{':
+			braceDepth++
+		case '}':
+			if braceDepth > 0 {
+				braceDepth--
+			}
+		}
+	}
+	return quote, braceDepth
+}
+
+func restorePathLine(stmt string) bool {
+	line := strings.TrimSpace(firstRestoreLine(stmt))
+	if !strings.HasPrefix(line, "/") {
+		return false
+	}
+	return restoreLineVerb(line) == ""
+}
+
+func restoreCommentLine(stmt string) bool {
+	return strings.HasPrefix(strings.TrimSpace(stmt), "#")
+}
+
+func firstRestoreLine(stmt string) string {
+	if i := strings.IndexByte(stmt, '\n'); i >= 0 {
+		return stmt[:i]
+	}
+	return stmt
+}
+
+func restoreLineVerb(line string) string {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(fields[0], "/"), "/")
+	if tokenIsRestoreVerb(parts[len(parts)-1]) {
+		return parts[len(parts)-1]
+	}
+	for _, field := range fields[1:] {
+		if tokenIsRestoreVerb(field) {
+			return field
+		}
+	}
+	return ""
+}
+
+func tokenIsRestoreVerb(token string) bool {
+	switch token {
+	case "add", "set", "remove", "move", "enable", "disable", "comment", "reset", "print":
+		return true
+	default:
+		return false
+	}
 }
 
 func restoreFileNames() []string {

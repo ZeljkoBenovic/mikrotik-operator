@@ -3,6 +3,7 @@ package routeros
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -146,12 +147,175 @@ func TestExport_V6OmitsShowSensitive(t *testing.T) {
 	}
 }
 
+func TestSplitRestoreScript_KeepsChunksUnderV6ContentsLimit(t *testing.T) {
+	t.Parallel()
+	script := largeRestoreScript(200)
+	if len(script) <= maxRestoreFileContentsBytes {
+		t.Fatalf("fixture too small: %d bytes", len(script))
+	}
+	chunks, err := splitRestoreScript(script, maxRestoreFileContentsBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("chunks = %d, want at least 2 for %d-byte script", len(chunks), len(script))
+	}
+	for i, chunk := range chunks {
+		if len(chunk) > maxRestoreFileContentsBytes {
+			t.Fatalf("chunk %d is %d bytes, want <= %d", i, len(chunk), maxRestoreFileContentsBytes)
+		}
+		if strings.TrimSpace(chunk) == "" {
+			t.Fatalf("chunk %d is empty", i)
+		}
+	}
+	joined := strings.Join(chunks, "\n")
+	for i := 0; i < 200; i++ {
+		want := "comment=op-restore-" + strconv.Itoa(i)
+		if !strings.Contains(joined, want) {
+			t.Fatalf("joined chunks missing %s", want)
+		}
+	}
+}
+
+func TestSplitRestoreScript_RepeatsPathWhenChunkStartsWithCommand(t *testing.T) {
+	t.Parallel()
+	script := "/ip address\n" + strings.Repeat("add address=10.0.0.1/32 interface=lo\n", 120)
+	chunks, err := splitRestoreScript(script, maxRestoreFileContentsBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("chunks = %d, want at least 2", len(chunks))
+	}
+	for i, chunk := range chunks {
+		if !strings.Contains(chunk, "/ip address") {
+			t.Fatalf("chunk %d missing path context: %q", i, chunk[:min(len(chunk), 80)])
+		}
+	}
+}
+
+func TestRestoreStatements_JoinsBackslashContinuation(t *testing.T) {
+	t.Parallel()
+	script := "/ip firewall filter\nadd action=accept chain=input \\\n    comment=\"allow admin\"\nadd action=drop chain=input\n"
+	got, err := restoreStatements(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("statements = %#v", got)
+	}
+	if !strings.Contains(got[1], "comment=\"allow admin\"") || strings.HasSuffix(strings.TrimSpace(got[1]), "\\") {
+		t.Fatalf("continuation not joined: %#v", got[1])
+	}
+}
+
+func TestSplitRestoreScript_RejectsStatementOverLimit(t *testing.T) {
+	t.Parallel()
+	huge := "/ip firewall filter\nadd comment=\"" + strings.Repeat("x", maxRestoreFileContentsBytes) + "\"\n"
+	_, err := splitRestoreScript(huge, maxRestoreFileContentsBytes)
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestImport_RejectsEmptyScript(t *testing.T) {
 	api := newScriptedAPIClient(t, &scriptedRouterOSClient{})
 	err := api.Import(context.Background(), "  ")
 	if err == nil || !strings.Contains(err.Error(), "empty script") {
 		t.Fatalf("error = %v", err)
 	}
+}
+
+func TestImport_ReturnsLeftoverFileRemoveError(t *testing.T) {
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{err: errors.New("print failed")},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	err := api.Import(context.Background(), "/ip dns set servers=1.1.1.1\n")
+	if err == nil || !strings.Contains(err.Error(), "print failed") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestImport_UploadsScriptLargerThanFileContentsLimitInChunks(t *testing.T) {
+	script := largeRestoreScript(2000)
+	if len(script) <= maxRestoreFileContentsBytes {
+		t.Fatalf("fixture too small: %d bytes", len(script))
+	}
+	if len(script) <= 60*1024 {
+		t.Fatalf("fixture %d bytes does not exceed the v7 ~60KiB contents cap", len(script))
+	}
+	chunks, err := splitRestoreScript(script, maxRestoreFileContentsBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scripted := &scriptedRouterOSClient{responses: restoreImportResponses(len(chunks))}
+	api := newScriptedAPIClient(t, scripted)
+	if err := api.Import(context.Background(), script); err != nil {
+		t.Fatal(err)
+	}
+	var sets, imports int
+	var contents []string
+	for _, call := range scripted.calls {
+		if len(call) == 0 {
+			continue
+		}
+		switch call[0] {
+		case "/file/set":
+			sets++
+			got := contentsArg(call)
+			if got == "" {
+				t.Fatalf("file set missing contents: %#v", call)
+			}
+			if len(got) > maxRestoreFileContentsBytes {
+				t.Fatalf("contents length %d exceeds v6 file cap %d", len(got), maxRestoreFileContentsBytes)
+			}
+			contents = append(contents, got)
+		case "/import":
+			imports++
+		}
+	}
+	if sets < 2 || sets != imports {
+		t.Fatalf("sets=%d imports=%d calls=%#v", sets, imports, scripted.calls)
+	}
+	joined := strings.Join(contents, "\n")
+	if !strings.Contains(joined, "comment=op-restore-0") || !strings.Contains(joined, "comment=op-restore-1999") {
+		t.Fatalf("imported chunks missing script body")
+	}
+}
+
+func largeRestoreScript(n int) string {
+	var builder strings.Builder
+	builder.WriteString("/ip firewall filter\n")
+	for i := 0; i < n; i++ {
+		builder.WriteString("add action=accept chain=forward comment=op-restore-")
+		builder.WriteString(strconv.Itoa(i))
+		builder.WriteByte('\n')
+	}
+	return builder.String()
+}
+
+func restoreImportResponses(chunks int) []scriptedRouterOSResponse {
+	empty := scriptedRouterOSResponse{reply: &routeros.Reply{}}
+	created := scriptedRouterOSResponse{reply: &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{".id": "*9", "name": restoreFileName},
+	}}}}
+	responses := []scriptedRouterOSResponse{empty, empty, created}
+	for i := 0; i < chunks; i++ {
+		responses = append(responses, empty, empty)
+	}
+	return append(responses, created, empty)
+}
+
+func contentsArg(call []string) string {
+	for _, arg := range call {
+		if strings.HasPrefix(arg, "=contents=") {
+			return strings.TrimPrefix(arg, "=contents=")
+		}
+	}
+	return ""
 }
 
 func TestImport_WritesFileThenImports(t *testing.T) {

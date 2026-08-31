@@ -19,6 +19,7 @@ const (
 	BackupRouterNamespaceLabel    = "mikrotik.operator.io/backup-router-namespace"
 	ConditionRemoteNotImplemented = "RemoteStorageNotImplemented"
 	ConditionImportInProgress     = "ImportInProgress"
+	ConditionImportSucceeded      = "ImportSucceeded"
 
 	// MaxExportBytes is below the typical 1.5MiB Kubernetes object limit so
 	// metadata and conditions still fit in etcd with the export body.

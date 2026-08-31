@@ -711,6 +711,117 @@ func TestRestoreStatusFailureAfterImportDoesNotReimport(t *testing.T) {
 	}
 }
 
+func TestRestoreImportInProgressWithoutCompletionRetriesImport(t *testing.T) {
+	scheme := backupTestScheme(t)
+	router, secret := backupTestRouter()
+	backup := &api.MikroTikBackup{
+		ObjectMeta: metav1.ObjectMeta{Name: "once", Namespace: "app", UID: "backup-uid"},
+		Spec:       api.MikroTikBackupSpec{RouterRef: "edge"},
+		Status:     api.MikroTikBackupStatus{Export: "/ip dns\n"},
+	}
+	restore := &api.MikroTikRestore{
+		ObjectMeta: metav1.ObjectMeta{Name: "bring-up", Namespace: "app", Generation: 1},
+		Spec: api.MikroTikRestoreSpec{
+			BackupRef: api.NamespacedName{Name: "once"},
+			RouterRef: "edge",
+			Confirm:   api.RestoreConfirmValue,
+		},
+		Status: api.MikroTikRestoreStatus{
+			Applied:            false,
+			BackupUID:          "backup-uid",
+			Target:             "edge",
+			ObservedGeneration: 1,
+			Conditions: []metav1.Condition{{
+				Type:    "Ready",
+				Status:  metav1.ConditionFalse,
+				Reason:  api.ConditionImportInProgress,
+				Message: "RouterOS /import is in progress",
+			}},
+		},
+	}
+	rosClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(router, secret, backup, restore).
+		WithStatusSubresource(&api.MikroTikRouter{}, &api.MikroTikBackup{}, &api.MikroTikRestore{}).
+		Build()
+	reconciler := RestoreReconciler{Client: kube, Factory: backupFactory(rosClient)}
+	if _, err := reconciler.Reconcile(context.Background(), restoreRequest("bring-up")); err != nil {
+		t.Fatal(err)
+	}
+	if len(rosClient.imported) != 1 {
+		t.Fatalf("ImportInProgress skipped /import: %#v", rosClient.imported)
+	}
+	var stored api.MikroTikRestore
+	if err := kube.Get(context.Background(), types.NamespacedName{Name: "bring-up", Namespace: "app"}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Status.Applied {
+		t.Fatalf("status = %#v", stored.Status)
+	}
+}
+
+func TestRestoreAppliedStaysAppliedWhenConfirmCleared(t *testing.T) {
+	scheme := backupTestScheme(t)
+	router, secret := backupTestRouter()
+	backup := &api.MikroTikBackup{
+		ObjectMeta: metav1.ObjectMeta{Name: "once", Namespace: "app", UID: "backup-uid"},
+		Spec:       api.MikroTikBackupSpec{RouterRef: "edge"},
+		Status:     api.MikroTikBackupStatus{Export: "/ip dns\n"},
+	}
+	restore := &api.MikroTikRestore{
+		ObjectMeta: metav1.ObjectMeta{Name: "bring-up", Namespace: "app", Generation: 2},
+		Spec: api.MikroTikRestoreSpec{
+			BackupRef: api.NamespacedName{Name: "once"},
+			RouterRef: "edge",
+		},
+		Status: api.MikroTikRestoreStatus{
+			Applied:            true,
+			BackupUID:          "backup-uid",
+			Target:             "edge",
+			ObservedGeneration: 1,
+			Conditions: []metav1.Condition{{
+				Type:   "Ready",
+				Status: metav1.ConditionTrue,
+				Reason: "Applied",
+			}},
+		},
+	}
+	rosClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(router, secret, backup, restore).
+		WithStatusSubresource(&api.MikroTikRouter{}, &api.MikroTikBackup{}, &api.MikroTikRestore{}).
+		Build()
+	reconciler := RestoreReconciler{Client: kube, Factory: backupFactory(rosClient)}
+	if _, err := reconciler.Reconcile(context.Background(), restoreRequest("bring-up")); err != nil {
+		t.Fatal(err)
+	}
+	if len(rosClient.imported) != 0 {
+		t.Fatalf("cleared confirm re-imported: %#v", rosClient.imported)
+	}
+	var stored api.MikroTikRestore
+	if err := kube.Get(context.Background(), types.NamespacedName{Name: "bring-up", Namespace: "app"}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Status.Applied {
+		t.Fatalf("cleared confirm wiped applied status: %#v", stored.Status)
+	}
+	if conditionReason(stored.Status.Conditions, "Ready") == "WaitingForConfirmation" {
+		t.Fatalf("applied restore was unconfirmed: %#v", stored.Status.Conditions)
+	}
+	stored.Spec.Confirm = api.RestoreConfirmValue
+	if err := kube.Update(context.Background(), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), restoreRequest("bring-up")); err != nil {
+		t.Fatal(err)
+	}
+	if len(rosClient.imported) != 0 {
+		t.Fatalf("re-setting RESTORE re-imported: %#v", rosClient.imported)
+	}
+}
+
 func TestRestoreUsesInactiveRouterRef(t *testing.T) {
 	scheme := backupTestScheme(t)
 	router, secret := backupTestRouter()
