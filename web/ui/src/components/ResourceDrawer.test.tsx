@@ -4,22 +4,24 @@ import { describe, expect, it, vi } from 'vitest'
 import { queryKeys } from '../api/client'
 import { ResourceDrawer } from './ResourceDrawer'
 import { jsonResponse, renderWithProviders } from '../test/render'
-import { portForwardKind, routerKind, standaloneRouter } from '../test/fixtures'
+import { dnsKind, portForwardKind, routerKind, standaloneRouter } from '../test/fixtures'
 
 function stubFetch(routers: ReturnType<typeof standaloneRouter>[] = []) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url === '/api/config') {
-        return jsonResponse({ namespace: 'mikrotik-operator-system' })
-      }
-      if (url.startsWith('/api/resources/mikrotikrouters')) {
-        return jsonResponse({ items: routers })
-      }
-      return jsonResponse({ items: [] })
-    }),
-  )
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url === '/api/config') {
+      return jsonResponse({ namespace: 'mikrotik-operator-system' })
+    }
+    if (url.startsWith('/api/resources/mikrotikrouters') && (!init?.method || init.method === 'GET')) {
+      return jsonResponse({ items: routers })
+    }
+    if (init?.method === 'POST') {
+      return jsonResponse(JSON.parse(String(init.body ?? '{}')))
+    }
+    return jsonResponse({ items: [] })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
 }
 
 function stubFetchDeferredConfig(routers: ReturnType<typeof standaloneRouter>[] = []) {
@@ -75,6 +77,9 @@ describe('ResourceDrawer', () => {
     renderWithProviders(<ResourceDrawer kind={routerKind} open mode="create" onClose={() => {}} />)
 
     const name = await screen.findByLabelText(/^name$/i)
+    await waitFor(() => {
+      expect(name).toBeEnabled()
+    })
     await user.type(name, 'My Port')
     expect(name).toHaveValue('my-port')
     expect(await screen.findByText(/Adjusted to a valid Kubernetes name/)).toBeInTheDocument()
@@ -107,6 +112,56 @@ describe('ResourceDrawer', () => {
     expect(await screen.findByText(/No MikroTikRouters found/)).toBeInTheDocument()
   })
 
+  it('lists routers from other namespaces and stores a cross-namespace routerRef', async () => {
+    const fetchMock = stubFetch([
+      standaloneRouter({
+        metadata: { name: 'edge', namespace: 'network' },
+      }),
+    ])
+    const user = userEvent.setup()
+    renderWithProviders(<ResourceDrawer kind={dnsKind} open mode="create" onClose={() => {}} />)
+
+    expect(await screen.findByText('edge (network)')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain('/api/resources/mikrotikrouters')
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes('/api/resources/mikrotikrouters?')),
+    ).toBe(false)
+
+    await user.type(await screen.findByLabelText(/^name$/i), 'ui-dns')
+    await user.type(screen.getByLabelText(/^dns name$/i), 'ui.home.arpa')
+    await user.type(screen.getByLabelText(/^address$/i), '10.0.0.8')
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => {
+      const createCall = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url) === '/api/resources/mikrotikdnsrecords/mikrotik-operator-system' &&
+          init?.method === 'POST',
+      )
+      expect(createCall).toBeTruthy()
+      const body = JSON.parse(String(createCall?.[1]?.body))
+      expect(body.metadata.namespace).toBe('mikrotik-operator-system')
+      expect(body.spec.routerRef).toBe('network/edge')
+    })
+  })
+
+  it('lists every live router, not only those in the operator namespace', async () => {
+    stubFetch([
+      standaloneRouter({
+        metadata: { name: 'edge', namespace: 'network' },
+      }),
+      standaloneRouter({
+        metadata: { name: 'core', namespace: 'mikrotik-operator-system' },
+      }),
+    ])
+    const user = userEvent.setup()
+    renderWithProviders(<ResourceDrawer kind={dnsKind} open mode="create" onClose={() => {}} />)
+
+    await user.click(await screen.findByRole('combobox', { name: /^router$/i }))
+    expect(await screen.findByText('edge (network)')).toBeInTheDocument()
+    expect(screen.getByText('core (mikrotik-operator-system)')).toBeInTheDocument()
+  })
+
   it('locks create fields and the YAML switch until operator config loads', async () => {
     const { loadConfig } = stubFetchDeferredConfig()
     const { queryClient } = renderWithProviders(
@@ -116,7 +171,7 @@ describe('ResourceDrawer', () => {
     expect(await screen.findByText('Create Router')).toBeInTheDocument()
     expect(screen.getByLabelText(/^name$/i)).toBeDisabled()
     expect(yamlSwitch()).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /create/i })).toBeDisabled()
 
     loadConfig()
     await waitFor(() => {
