@@ -10,11 +10,6 @@ body {
   background: #f4f6f8;
 }
 
-.app-shell {
-  min-height: 100%;
-  min-height: 100dvh;
-}
-
 .managed-badge-wrap {
   display: inline-block;
   max-width: 100%;
