@@ -218,6 +218,95 @@ describe('ResourceDrawer', () => {
     expect(yamlSwitch()).toBeEnabled()
   })
 
+  it('unlocks create when operator config fails instead of spinning forever', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === '/api/config') {
+          return jsonResponse({ message: 'config unavailable' }, 500)
+        }
+        if (url.startsWith('/api/resources/mikrotikrouters')) {
+          return jsonResponse({ items: [] })
+        }
+        return jsonResponse({ items: [] })
+      }),
+    )
+    renderWithProviders(
+      <ResourceDrawer kind={routerKind} open mode="create" onClose={() => {}} />,
+    )
+
+    expect(await screen.findByText('Create Router')).toBeInTheDocument()
+    const create = await screen.findByRole('button', { name: /create/i })
+    await waitFor(() => {
+      expect(screen.getByLabelText(/^name$/i)).toBeEnabled()
+      expect(create).not.toHaveClass('ant-btn-loading')
+      expect(create).toBeEnabled()
+    })
+  })
+
+  it('updates the create namespace when operator config recovers after a failure', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/config') {
+        return jsonResponse({ message: 'config unavailable' }, 500)
+      }
+      if (url.startsWith('/api/resources/mikrotikrouters')) {
+        return jsonResponse({ items: [] })
+      }
+      return jsonResponse({ items: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    const { queryClient } = renderWithProviders(
+      <ResourceDrawer kind={routerKind} open mode="create" onClose={() => {}} />,
+    )
+
+    const name = await screen.findByLabelText(/^name$/i)
+    await waitFor(() => {
+      expect(name).toBeEnabled()
+      const hidden = document.querySelector('#namespace') as HTMLInputElement | null
+      expect(hidden?.value).toBe('default')
+    })
+    await user.type(name, 'edge-router')
+    expect(name).toHaveValue('edge-router')
+
+    queryClient.setQueryData(queryKeys.config, 'mikrotik-operator-system')
+
+    await waitFor(() => {
+      const hidden = document.querySelector('#namespace') as HTMLInputElement | null
+      expect(hidden?.value).toBe('mikrotik-operator-system')
+    })
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue('edge-router')
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+        '/api/secrets/mikrotik-operator-system',
+      )
+    })
+  })
+
+  it('clears the name error after blur finalizes a trailing separator', async () => {
+    stubFetch()
+    const user = userEvent.setup()
+    renderWithProviders(<ResourceDrawer kind={routerKind} open mode="create" onClose={() => {}} />)
+
+    const name = await screen.findByLabelText(/^name$/i)
+    await waitFor(() => {
+      expect(name).toBeEnabled()
+    })
+    await user.type(name, 'web-')
+    expect(name).toHaveValue('web-')
+    expect(
+      await screen.findByText(/start and end with a letter or number/),
+    ).toBeInTheDocument()
+
+    await user.tab()
+    await waitFor(() => {
+      expect(name).toHaveValue('web')
+      expect(screen.queryByText(/start and end with a letter or number/)).not.toBeInTheDocument()
+    })
+  })
+
   it('does not reset an in-progress edit when operator config arrives late', async () => {
     const { loadConfig } = stubFetchDeferredConfig()
     const user = userEvent.setup()
