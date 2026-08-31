@@ -120,7 +120,7 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
                         { label: 'Connected', children: formatValue(resource.status?.connected) },
                         { label: 'Applied', children: formatValue(resource.status?.applied) },
                         { label: 'Version', children: resource.status?.version || '—' },
-                        { label: 'Router ref', children: resource.status?.routerRef || '—' },
+                        { label: 'Router', children: resource.status?.routerRef || '—' },
                         { label: 'Target address', children: resource.status?.targetAddress || '—' },
                         { label: 'External address', children: resource.status?.externalAddress || '—' },
                       ].filter((item) => item.children !== '—')}

@@ -1,6 +1,7 @@
 import { AutoComplete, Button, Checkbox, Col, Form, Input, InputNumber, Radio, Row, Space, Switch } from 'antd'
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import {
+  ResourceNameInput,
   RouterRefSelect,
   SecretNameSelect,
 } from './shared'
@@ -18,9 +19,7 @@ type FormCommonProps = {
 function MetaFields({ createMode }: FormCommonProps) {
   return (
     <>
-      <Form.Item name="name" label="Name" rules={[{ required: true, message: 'Name is required' }]}>
-        <Input disabled={!createMode} placeholder="resource name" />
-      </Form.Item>
+      <ResourceNameInput disabled={!createMode} />
       <Form.Item name="namespace" hidden>
         <Input />
       </Form.Item>
@@ -151,8 +150,8 @@ export function DNSRecordForm({ createMode }: FormCommonProps) {
   return (
     <>
       <MetaFields createMode={createMode} />
-      <Form.Item name={['spec', 'routerRef']} label="Router ref">
-        <RouterRefSelect namespace={namespace} />
+      <Form.Item name={['spec', 'routerRef']} label="Router">
+        <RouterRefSelect namespace={namespace} autoSelect={createMode} />
       </Form.Item>
       <Form.Item
         name={['spec', 'name']}
@@ -192,8 +191,8 @@ export function RouteForm({ createMode }: FormCommonProps) {
   return (
     <>
       <MetaFields createMode={createMode} />
-      <Form.Item name={['spec', 'routerRef']} label="Router ref">
-        <RouterRefSelect namespace={namespace} />
+      <Form.Item name={['spec', 'routerRef']} label="Router">
+        <RouterRefSelect namespace={namespace} autoSelect={createMode} />
       </Form.Item>
       <Form.Item
         name={['spec', 'destination']}
@@ -224,10 +223,10 @@ export function PortForwardForm({ createMode }: FormCommonProps) {
       <MetaFields createMode={createMode} />
       <Form.Item
         name={['spec', 'routerRef']}
-        label="Router ref"
-        rules={[{ required: true, message: 'Router ref is required' }]}
+        label="Router"
+        rules={[{ required: true, message: 'Router is required' }]}
       >
-        <RouterRefSelect namespace={namespace} />
+        <RouterRefSelect namespace={namespace} autoSelect={createMode} />
       </Form.Item>
       <Form.Item
         name={['spec', 'protocol']}
@@ -334,8 +333,8 @@ export function FirewallRuleForm({ createMode }: FormCommonProps) {
   return (
     <>
       <MetaFields createMode={createMode} />
-      <Form.Item name={['spec', 'routerRef']} label="Router ref">
-        <RouterRefSelect namespace={namespace} />
+      <Form.Item name={['spec', 'routerRef']} label="Router">
+        <RouterRefSelect namespace={namespace} autoSelect={createMode} />
       </Form.Item>
       <Form.Item name={['spec', 'chain']} label="Chain" rules={[{ required: true, message: 'Chain is required' }]}>
         <AutoComplete options={FIREWALL_CHAINS.map((value) => ({ value }))} placeholder="forward" />
