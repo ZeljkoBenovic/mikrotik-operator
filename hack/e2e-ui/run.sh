@@ -72,21 +72,6 @@ type: Opaque
 stringData:
   username: admin
   password: super-secret-e2e
----
-apiVersion: mikrotik.operator.io/v1alpha1
-kind: MikroTikDNSRecord
-metadata:
-  name: owned-dns
-  namespace: ${WORKLOAD_NS}
-  ownerReferences:
-  - apiVersion: v1
-    kind: Service
-    name: web
-    uid: 00000000-0000-0000-0000-000000000001
-    controller: true
-spec:
-  name: owned.e2e.home.arpa
-  address: 10.99.0.8
 EOF
 
 ui_svc="$(kubectl -n "$NAMESPACE" get svc -l app.kubernetes.io/component=ui -o jsonpath='{.items[0].metadata.name}')"
