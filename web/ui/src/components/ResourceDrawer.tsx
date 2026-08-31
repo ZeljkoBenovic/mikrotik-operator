@@ -55,7 +55,7 @@ export function ResourceDrawer({
     if (seeded) {
       return
     }
-    if (createMode && !config.data) {
+    if (createMode && !config.data && !config.isError) {
       return
     }
     const ns = resource?.metadata.namespace || operatorNamespace
@@ -77,7 +77,7 @@ export function ResourceDrawer({
     setYamlText(toYAML(body))
     setYamlMode(false)
     setSeeded(true)
-  }, [open, resource, kind, form, createMode, config.data, operatorNamespace, seeded])
+  }, [open, resource, kind, form, createMode, config.data, config.isError, operatorNamespace, seeded])
 
   const mutation = useMutation({
     mutationFn: async (body: ResourceObject) => {
