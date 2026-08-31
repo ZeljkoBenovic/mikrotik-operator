@@ -39,12 +39,22 @@ describe('api client', () => {
       if (url === '/api/secrets/app') {
         return new Response(JSON.stringify({ items: [{ name: 'b' }, { name: 'a' }] }), { status: 200 })
       }
+      if (url === '/api/services/app') {
+        return new Response(JSON.stringify({ items: [{ name: 'web' }, { name: 'api' }] }), { status: 200 })
+      }
+      if (url === '/api/pods/app') {
+        return new Response(JSON.stringify({ items: [{ name: 'web-1' }, { name: 'web-0' }] }), { status: 200 })
+      }
       throw new Error(url)
     })
     vi.stubGlobal('fetch', fetchMock)
     await expect(api.namespaces()).resolves.toEqual(['app', 'other'])
     await expect(api.secrets('app')).resolves.toEqual(['a', 'b'])
+    await expect(api.services('app')).resolves.toEqual(['api', 'web'])
+    await expect(api.pods('app')).resolves.toEqual(['web-0', 'web-1'])
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe('/api/secrets/app')
+    expect(String(fetchMock.mock.calls[2]?.[0])).toBe('/api/services/app')
+    expect(String(fetchMock.mock.calls[3]?.[0])).toBe('/api/pods/app')
   })
 
   it('reads the operator namespace from config', async () => {
@@ -121,6 +131,15 @@ describe('api client', () => {
     await expect(api.overview()).rejects.toMatchObject({ status: 500, message: '500 Internal Server Error' })
   })
 
+  it('encodes namespace in service and pod list URLs', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.services('app ns')
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/services/app%20ns')
+    await api.pods('app ns')
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe('/api/pods/app%20ns')
+  })
+
   it('encodes namespace and name in resource URLs', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
@@ -136,5 +155,7 @@ describe('queryKeys', () => {
   it('distinguishes all-namespaces from a namespace filter', () => {
     expect(queryKeys.resources('mikrotikrouters')).toEqual(['resources', 'mikrotikrouters', 'all'])
     expect(queryKeys.resources('mikrotikrouters', 'app')).toEqual(['resources', 'mikrotikrouters', 'app'])
+    expect(queryKeys.services('app')).toEqual(['services', 'app'])
+    expect(queryKeys.pods('app')).toEqual(['pods', 'app'])
   })
 })

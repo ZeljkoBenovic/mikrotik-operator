@@ -13,6 +13,13 @@ and the project follows semantic versioning.
   `dst-address` on the dst-nat rule so the match applies only to traffic
   received on that IP. The `public-ip` annotation remains the fallback and
   the source for generated port-forward children.
+- Admin UI service and pod refs use searchable namespace-then-name
+  dropdowns, backed by name-only list APIs.
+
+### Fixed
+
+- Admin UI shell fills the viewport height, and owned-resource labels
+  ellipsize instead of overlapping row actions.
 
 ## [0.2.0] - 2026-08-31
 

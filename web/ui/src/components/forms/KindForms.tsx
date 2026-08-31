@@ -1,6 +1,7 @@
 import { AutoComplete, Button, Checkbox, Col, Form, Input, InputNumber, Radio, Row, Space, Switch } from 'antd'
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import {
+  NamespacedRefFields,
   ResourceNameInput,
   RouterRefSelect,
   SecretNameSelect,
@@ -170,18 +171,11 @@ export function DNSRecordForm({ createMode }: FormCommonProps) {
       <Form.Item name={['spec', 'ttl']} label="TTL">
         <Input placeholder="1h" />
       </Form.Item>
-      <Row gutter={12}>
-        <Col span={12}>
-          <Form.Item name={['spec', 'serviceRef', 'namespace']} label="Service namespace">
-            <Input placeholder="optional" />
-          </Form.Item>
-        </Col>
-        <Col span={12}>
-          <Form.Item name={['spec', 'serviceRef', 'name']} label="Service name">
-            <Input placeholder="optional" />
-          </Form.Item>
-        </Col>
-      </Row>
+      <NamespacedRefFields
+        kind="service"
+        namespaceLabel="Service namespace"
+        nameLabel="Service name"
+      />
     </>
   )
 }
@@ -279,48 +273,20 @@ export function PortForwardForm({ createMode }: FormCommonProps) {
         </Radio.Group>
       </Form.Item>
       {targetType === 'service' ? (
-        <Row gutter={12}>
-          <Col span={12}>
-            <Form.Item
-              name={['spec', 'serviceRef', 'namespace']}
-              label="Service namespace"
-              rules={[{ required: true, message: 'Service namespace is required' }]}
-            >
-              <Input />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item
-              name={['spec', 'serviceRef', 'name']}
-              label="Service name"
-              rules={[{ required: true, message: 'Service name is required' }]}
-            >
-              <Input />
-            </Form.Item>
-          </Col>
-        </Row>
+        <NamespacedRefFields
+          kind="service"
+          namespaceLabel="Service namespace"
+          nameLabel="Service name"
+          required
+        />
       ) : null}
       {targetType === 'pod' ? (
-        <Row gutter={12}>
-          <Col span={12}>
-            <Form.Item
-              name={['spec', 'podRef', 'namespace']}
-              label="Pod namespace"
-              rules={[{ required: true, message: 'Pod namespace is required' }]}
-            >
-              <Input />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item
-              name={['spec', 'podRef', 'name']}
-              label="Pod name"
-              rules={[{ required: true, message: 'Pod name is required' }]}
-            >
-              <Input />
-            </Form.Item>
-          </Col>
-        </Row>
+        <NamespacedRefFields
+          kind="pod"
+          namespaceLabel="Pod namespace"
+          nameLabel="Pod name"
+          required
+        />
       ) : null}
       {targetType !== 'service' && targetType !== 'pod' ? (
         <Form.Item

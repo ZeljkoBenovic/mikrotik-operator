@@ -247,19 +247,17 @@ func validateUIClusterRole(doc unstructured.Unstructured) []error {
 			}
 		}
 	}
-	secretRule := findCoreRule(role.Rules, "secrets")
-	if secretRule == nil {
-		problems = append(problems, errors.New("UI ClusterRole missing secrets list"))
-	} else if !sameSet(secretRule.Verbs, []string{"list"}) {
-		problems = append(problems, fmt.Errorf("secrets verbs %v, want [list] only", secretRule.Verbs))
+	for _, resource := range []string{"secrets", "namespaces", "services", "pods"} {
+		rule := findCoreRule(role.Rules, resource)
+		if rule == nil {
+			problems = append(problems, fmt.Errorf("UI ClusterRole missing %s list", resource))
+			continue
+		}
+		if !sameSet(rule.Verbs, []string{"list"}) {
+			problems = append(problems, fmt.Errorf("%s verbs %v, want [list] only", resource, rule.Verbs))
+		}
 	}
-	nsRule := findCoreRule(role.Rules, "namespaces")
-	if nsRule == nil {
-		problems = append(problems, errors.New("UI ClusterRole missing namespaces list"))
-	} else if !sameSet(nsRule.Verbs, []string{"list"}) {
-		problems = append(problems, fmt.Errorf("namespaces verbs %v, want [list] only", nsRule.Verbs))
-	}
-	forbidden := []string{"pods", "nodes", "leases", "configmaps", "events"}
+	forbidden := []string{"nodes", "leases", "configmaps", "events", "pods/log", "pods/exec"}
 	for _, name := range forbidden {
 		if findAnyResource(role.Rules, name) {
 			problems = append(problems, fmt.Errorf("UI ClusterRole must not grant %s", name))
