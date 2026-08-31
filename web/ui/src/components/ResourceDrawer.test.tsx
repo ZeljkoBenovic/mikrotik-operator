@@ -112,6 +112,30 @@ describe('ResourceDrawer', () => {
     expect(await screen.findByText(/No MikroTikRouters found/)).toBeInTheDocument()
   })
 
+  it('does not treat a failed router list as an empty cluster', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url === '/api/config') {
+          return jsonResponse({ namespace: 'mikrotik-operator-system' })
+        }
+        if (url.startsWith('/api/resources/mikrotikrouters') && (!init?.method || init.method === 'GET')) {
+          return jsonResponse({ message: 'routers unavailable' }, 500)
+        }
+        return jsonResponse({ items: [] })
+      }),
+    )
+    renderWithProviders(
+      <ResourceDrawer kind={portForwardKind} open mode="create" onClose={() => {}} />,
+    )
+
+    expect(await screen.findByText('Create Port Forward')).toBeInTheDocument()
+    expect(await screen.findByText('routers unavailable')).toBeInTheDocument()
+    expect(screen.queryByText(/No MikroTikRouters found/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Create a Router first/)).not.toBeInTheDocument()
+  })
+
   it('lists routers from other namespaces and stores a cross-namespace routerRef', async () => {
     const fetchMock = stubFetch([
       standaloneRouter({

@@ -2,7 +2,7 @@ import { App, Button, Input, Space, Table, Typography } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import { Link, useOutletContext } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import { api, queryKeys } from '../api/client'
 import type { ResourceObject } from '../api/types'
 import { ManagedBadge } from '../components/ManagedBadge'
@@ -16,6 +16,8 @@ import { displayNamespace, isManaged, specSummary } from '../utils/resource'
 export function ResourceList({ kind }: { kind: KindConfig }) {
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const location = useLocation()
   const { namespaceFilter } = useOutletContext<OutletContext>()
   const [search, setSearch] = useState('')
   const [drawer, setDrawer] = useState<{ mode: 'create' | 'edit'; resource?: ResourceObject } | null>(null)
@@ -55,6 +57,15 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
       return hay.includes(q)
     })
   }, [kind.apiKind, list.data, search])
+
+  function showCreatedResource(namespace: string) {
+    if (!namespaceFilter || namespaceFilter === namespace) {
+      return
+    }
+    const params = new URLSearchParams(location.search)
+    params.set('namespace', namespace)
+    navigate(`${location.pathname}?${params.toString()}`, { replace: true })
+  }
 
   function confirmDelete(resource: ResourceObject) {
     if (isManaged(resource)) {
@@ -147,6 +158,7 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
         mode={drawer?.mode ?? 'create'}
         resource={drawer?.resource}
         onClose={() => setDrawer(null)}
+        onCreated={showCreatedResource}
       />
     </>
   )

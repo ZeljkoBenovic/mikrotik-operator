@@ -24,6 +24,7 @@ type ResourceDrawerProps = {
   mode: 'create' | 'edit'
   resource?: ResourceObject
   onClose: () => void
+  onCreated?: (namespace: string) => void
 }
 
 export function ResourceDrawer({
@@ -32,6 +33,7 @@ export function ResourceDrawer({
   mode,
   resource,
   onClose,
+  onCreated,
 }: ResourceDrawerProps) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
@@ -98,7 +100,12 @@ export function ResourceDrawer({
       await queryClient.invalidateQueries({
         queryKey: queryKeys.resource(kind.slug, ns, body.metadata.name),
       })
-      message.success(mode === 'edit' ? `${kind.singular} updated` : `${kind.singular} created`)
+      if (mode === 'create') {
+        message.success(`${kind.singular} created in ${ns}`)
+        onCreated?.(ns)
+      } else {
+        message.success(`${kind.singular} updated`)
+      }
       onClose()
     },
     onError: (error) => {

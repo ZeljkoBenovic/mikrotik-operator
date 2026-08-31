@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import type { ResourceObject } from '../../api/types'
 import { api, queryKeys } from '../../api/client'
+import { errorMessage } from '../../utils/errors'
 import {
   KUBERNETES_NAME_MAX_LENGTH,
   kubernetesNameError,
@@ -145,7 +146,8 @@ export function RouterRefSelect({
     onChange?.(options[0].value)
   }, [autoSelect, disabled, namespace, onChange, options, value])
 
-  const empty = !query.isLoading && options.length === 0
+  const empty = query.isSuccess && options.length === 0
+  const failed = query.isError
 
   return (
     <>
@@ -158,11 +160,17 @@ export function RouterRefSelect({
         options={options}
         value={value || undefined}
         onChange={onChange}
-        placeholder={empty ? 'No routers found' : 'Select a router'}
-        notFoundContent={empty ? 'No MikroTikRouter resources found' : undefined}
+        placeholder={failed ? 'Could not load routers' : empty ? 'No routers found' : 'Select a router'}
+        notFoundContent={
+          failed ? errorMessage(query.error) : empty ? 'No MikroTikRouter resources found' : undefined
+        }
         style={{ width: '100%' }}
       />
-      {empty ? (
+      {failed ? (
+        <Typography.Text type="danger" style={{ display: 'block', marginTop: 4 }}>
+          {errorMessage(query.error)}
+        </Typography.Text>
+      ) : empty ? (
         <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4 }}>
           No MikroTikRouters found. Create a Router first.
         </Typography.Text>
