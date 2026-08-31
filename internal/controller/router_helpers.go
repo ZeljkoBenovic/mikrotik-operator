@@ -179,7 +179,13 @@ func cleanupRouterTargets(
 		if target == "" || target == exclude {
 			continue
 		}
-		key := types.NamespacedName{Name: target, Namespace: namespace}
+		key := routerKeyFromRef(namespace, target)
+		if key.Name == "" {
+			continue
+		}
+		if exclude != "" && key == routerKeyFromRef(namespace, exclude) {
+			continue
+		}
 		err := withRouterConnections(ctx, kube, factory, key, false, func(_ api.MikroTikRouter, connections []routerConnection) error {
 			for _, connection := range connections {
 				if err := cleanup(ctx, connection.Client); err != nil {
@@ -305,11 +311,15 @@ func cleanupPreviousRouter(
 	if previousRef == "" || previousRef == currentRef {
 		return nil
 	}
+	previousKey := routerKeyFromRef(namespace, previousRef)
+	if currentRef != "" && previousKey == routerKeyFromRef(namespace, currentRef) {
+		return nil
+	}
 	err := withRouterConnections(
 		ctx,
 		kube,
 		factory,
-		types.NamespacedName{Name: previousRef, Namespace: namespace},
+		previousKey,
 		false,
 		func(_ api.MikroTikRouter, connections []routerConnection) error {
 			for _, connection := range connections {

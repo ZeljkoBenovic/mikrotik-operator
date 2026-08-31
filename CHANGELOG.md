@@ -7,6 +7,18 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-31
+
+### Fixed
+
+- Resolve `MikroTikRouter` targets across namespaces when a resource has no local router. Explicit refs accept `name` or `namespace/name`.
+
+### Changed
+
+- Default operator and admin UI image tag is `v0.1.1` (`Chart.yaml` `appVersion`). Chart package version is `0.1.1`.
+
+## [0.1.0] - 2026-08-31
+
 ### Changed
 
 - Release publishing now uses GoReleaser to push multi-arch operator and admin UI container images to GHCR. GitHub Releases stay changelog-only, with no binary or OS packages.

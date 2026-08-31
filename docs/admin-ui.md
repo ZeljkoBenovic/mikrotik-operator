@@ -22,7 +22,7 @@ UI enabled. For an existing cluster:
 ```sh
 helm upgrade --install mikrotik-operator \
   oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator \
-  --version 0.1.0 \
+  --version 0.1.1 \
   --namespace mikrotik-operator-system \
   --create-namespace \
   --set ui.enabled=true

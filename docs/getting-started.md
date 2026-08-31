@@ -56,7 +56,7 @@ The Secret must contain the keys `username` and `password`.
 ```sh
 helm upgrade --install mikrotik-operator \
   oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator \
-  --version 0.1.0 \
+  --version 0.1.1 \
   --namespace mikrotik-operator-system \
   --create-namespace
 ```
@@ -87,10 +87,11 @@ kubectl apply -f router.yaml
 kubectl -n mikrotik-system get mikrotikrouter home-router
 ```
 
-The `routerRef` field is optional on managed resources when exactly one router
-exists in their namespace. If multiple routers exist, set `routerRef`
-explicitly. A router definition can also contain multiple endpoints; all
-configured endpoints receive the managed configuration.
+The `routerRef` field is optional on managed resources when exactly one live
+router exists in their namespace, or when exactly one live router exists in
+the cluster. If multiple routers exist, set `routerRef` to the router name
+or to `namespace/name`. A router definition can also contain multiple
+endpoints; all configured endpoints receive the managed configuration.
 
 ## Verify installation
 
@@ -122,7 +123,7 @@ Or upgrade an existing chart install:
 ```sh
 helm upgrade --install mikrotik-operator \
   oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator \
-  --version 0.1.0 \
+  --version 0.1.1 \
   --namespace mikrotik-operator-system \
   --create-namespace \
   --set ui.enabled=true

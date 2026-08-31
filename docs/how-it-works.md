@@ -8,7 +8,11 @@ and `password` values.
 ## Reconciliation flow
 
 1. A controller reads the Kubernetes resource and its dependencies.
-2. The controller resolves the target router or routers.
+2. The controller resolves the target router. A local router in the resource
+   namespace is preferred. If that namespace has none, a unique live router
+   anywhere in the cluster is selected. Ambiguous cases require an explicit
+   `routerRef` or `mikrotik.operator.io/router-ref` value (`name` or
+   `namespace/name`).
 3. It calculates the desired DNS, route, NAT, or firewall entries.
 4. The RouterOS client reads entries carrying the operator's managed comment.
 5. It applies only missing or changed entries and removes stale entries owned

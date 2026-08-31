@@ -51,7 +51,8 @@ The core resources are namespaced:
 | `MikroTikFirewallRule` | Custom `/ip firewall filter` entry |
 
 `routerRef` is optional when exactly one `MikroTikRouter` exists in the
-resource namespace.
+resource namespace, or when exactly one live router exists in the cluster.
+Set `routerRef` to `name` or `namespace/name` when more than one router exists.
 
 ## Quick start
 
@@ -81,7 +82,7 @@ The chart installs the operator, RBAC, CRDs, probes, and the `mikrotik`
 helm upgrade --install mikrotik-operator ./charts/mikrotik-operator \
   --namespace mikrotik-operator-system \
   --create-namespace \
-  --set image.tag=v0.1.0
+  --set image.tag=v0.1.1
 ```
 
 The raw Kubernetes resources are also available under [`config/`](config/).
@@ -151,8 +152,8 @@ metadata:
     mikrotik.operator.io/route-mode: single-node
 ```
 
-Use `mikrotik.operator.io/router-ref` when a namespace contains multiple
-routers.
+Use `mikrotik.operator.io/router-ref` when more than one router exists.
+The value may be a router name or `namespace/name`.
 
 ## Ingress and Gateway API
 

@@ -11,7 +11,7 @@ title: Reference
 | --- | --- | --- |
 | `mikrotik.operator.io/dns-name` | Service | Creates or updates an owned RouterOS DNS record. |
 | `mikrotik.operator.io/public-ip` | Service, Ingress, HTTPRoute | Creates one `dst-nat`/`src-nat` pair per selected TCP or UDP Service port. The value must be an IP address. |
-| `mikrotik.operator.io/router-ref` | Service, Ingress, HTTPRoute and custom resources | Selects the named `MikroTikRouter` in the resource namespace. |
+| `mikrotik.operator.io/router-ref` | Service, Ingress, HTTPRoute and custom resources | Selects a `MikroTikRouter` by name in the resource namespace, or as `namespace/name` for a router in another namespace. |
 | `mikrotik.operator.io/route-mode` | Service | Use `single-node` instead of routing through all node InternalIP addresses. |
 
 ## Custom resources

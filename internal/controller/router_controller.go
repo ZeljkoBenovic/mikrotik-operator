@@ -325,7 +325,7 @@ func (d *DNSReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 		// object before making external changes or updating status.
 		return reconcile.Result{}, nil
 	}
-	routerRef, err := resolveRouterReference(ctx, d.Client, o.Namespace, o.Spec.RouterRef)
+	routerKey, err := resolveRouterReference(ctx, d.Client, o.Namespace, o.Spec.RouterRef)
 	if err != nil {
 		if !errors.Is(err, errImplicitRouterSelection) {
 			return reconcile.Result{}, err
@@ -356,6 +356,7 @@ func (d *DNSReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 		}
 		return d.status(ctx, &o, err)
 	}
+	routerRef := routerRefStorage(o.Namespace, routerKey)
 	comment := ros.ManagedComment("dns", o.Name, o.Namespace)
 	address := o.Spec.Address
 	var referencedService *corev1.Service
@@ -441,7 +442,6 @@ func (d *DNSReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 		return reconcile.Result{}, claimErr
 	}
 	defer releaseClaim()
-	routerKey := types.NamespacedName{Name: routerRef, Namespace: o.Namespace}
 	if err := withRouterConnections(ctx, d.Client, d.Factory, routerKey, true, func(router api.MikroTikRouter, connections []routerConnection) error {
 		for _, connection := range connections {
 			if err := connection.Client.EnsureDNS(ctx, o.Spec.Name, address, o.Spec.TTL, comment); err != nil {
@@ -478,7 +478,7 @@ func (d *DNSReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 }
 
 func (d *DNSReconciler) cleanupConfiguration(ctx context.Context, o *api.MikroTikDNSRecord, routerRef string) error {
-	err := withRouterConnections(ctx, d.Client, d.Factory, types.NamespacedName{Name: routerRef, Namespace: o.Namespace}, false, func(_ api.MikroTikRouter, connections []routerConnection) error {
+	err := withRouterConnections(ctx, d.Client, d.Factory, routerKeyFromRef(o.Namespace, routerRef), false, func(_ api.MikroTikRouter, connections []routerConnection) error {
 		if err := deleteManagedRoutes(ctx, connections, "ingress-route", o.Name, o.Namespace); err != nil {
 			return err
 		}
@@ -507,21 +507,127 @@ func (d *DNSReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).For(&api.MikroTikDNSRecord{}).Complete(d)
 }
 
-func resolveRouterReference(ctx context.Context, kube client.Client, namespace, reference string) (string, error) {
-	if reference != "" {
-		return reference, nil
+func splitRouterReference(reference string) (namespace, name string) {
+	reference = strings.TrimSpace(reference)
+	if reference == "" {
+		return "", ""
 	}
+	namespace, name, found := strings.Cut(reference, "/")
+	if !found {
+		return "", reference
+	}
+	return namespace, name
+}
+
+func routerRefStorage(resourceNamespace string, key types.NamespacedName) string {
+	if key.Namespace == "" || key.Namespace == resourceNamespace {
+		return key.Name
+	}
+	return key.Namespace + "/" + key.Name
+}
+
+func routerKeyFromRef(resourceNamespace, reference string) types.NamespacedName {
+	hintNamespace, name := splitRouterReference(reference)
+	if name == "" {
+		return types.NamespacedName{}
+	}
+	if hintNamespace == "" {
+		hintNamespace = resourceNamespace
+	}
+	return types.NamespacedName{Namespace: hintNamespace, Name: name}
+}
+
+func canonicalRouterClaimKey(key types.NamespacedName) string {
+	if key.Name == "" {
+		return ""
+	}
+	return key.Namespace + "/" + key.Name
+}
+
+func resolveRouterReference(ctx context.Context, kube client.Client, namespace, reference string) (types.NamespacedName, error) {
+	hintNamespace, name := splitRouterReference(reference)
+	if name != "" && hintNamespace != "" {
+		key := types.NamespacedName{Namespace: hintNamespace, Name: name}
+		var router api.MikroTikRouter
+		if err := kube.Get(ctx, key, &router); err != nil {
+			return types.NamespacedName{}, err
+		}
+		return key, nil
+	}
+	if name != "" {
+		local := types.NamespacedName{Namespace: namespace, Name: name}
+		var router api.MikroTikRouter
+		err := kube.Get(ctx, local, &router)
+		if err == nil {
+			return local, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return types.NamespacedName{}, err
+		}
+		cluster, clusterErr := uniqueClusterRouter(ctx, kube, name)
+		if clusterErr == nil {
+			return cluster, nil
+		}
+		if apierrors.IsNotFound(clusterErr) {
+			return local, nil
+		}
+		return types.NamespacedName{}, clusterErr
+	}
+	var localRouters api.MikroTikRouterList
+	if err := kube.List(ctx, &localRouters, client.InNamespace(namespace)); err != nil {
+		return types.NamespacedName{}, err
+	}
+	live := liveRouters(localRouters.Items)
+	if len(live) == 1 {
+		router := live[0]
+		return types.NamespacedName{Namespace: router.Namespace, Name: router.Name}, nil
+	}
+	if len(live) > 1 {
+		return types.NamespacedName{}, fmt.Errorf(
+			"%w: multiple MikroTikRouters exist in namespace %s; set routerRef explicitly",
+			errImplicitRouterSelection,
+			namespace,
+		)
+	}
+	return uniqueClusterRouter(ctx, kube, "")
+}
+
+func uniqueClusterRouter(ctx context.Context, kube client.Client, name string) (types.NamespacedName, error) {
 	var routers api.MikroTikRouterList
-	if err := kube.List(ctx, &routers, client.InNamespace(namespace)); err != nil {
-		return "", err
+	if err := kube.List(ctx, &routers); err != nil {
+		return types.NamespacedName{}, err
 	}
-	if len(routers.Items) == 1 {
-		return routers.Items[0].Name, nil
+	matches := make([]api.MikroTikRouter, 0, len(routers.Items))
+	for _, router := range liveRouters(routers.Items) {
+		if name != "" && router.Name != name {
+			continue
+		}
+		matches = append(matches, router)
 	}
-	if len(routers.Items) == 0 {
-		return "", fmt.Errorf("%w: no MikroTikRouter exists in namespace %s", errImplicitRouterSelection, namespace)
+	if len(matches) == 1 {
+		router := matches[0]
+		return types.NamespacedName{Namespace: router.Namespace, Name: router.Name}, nil
 	}
-	return "", fmt.Errorf("%w: multiple MikroTikRouters exist in namespace %s; set routerRef explicitly", errImplicitRouterSelection, namespace)
+	if len(matches) == 0 {
+		if name != "" {
+			return types.NamespacedName{}, apierrors.NewNotFound(
+				api.GroupVersion.WithResource("mikrotikrouters").GroupResource(),
+				name,
+			)
+		}
+		return types.NamespacedName{}, fmt.Errorf("%w: no MikroTikRouter exists in the cluster", errImplicitRouterSelection)
+	}
+	return types.NamespacedName{}, fmt.Errorf("%w: multiple MikroTikRouters exist; set routerRef explicitly", errImplicitRouterSelection)
+}
+
+func liveRouters(routers []api.MikroTikRouter) []api.MikroTikRouter {
+	live := make([]api.MikroTikRouter, 0, len(routers))
+	for _, router := range routers {
+		if router.DeletionTimestamp.IsZero() {
+			live = append(live, router)
+		}
+	}
+	return live
 }
 
 func serviceAddress(ctx context.Context, kube client.Client, service corev1.Service) (string, error) {
@@ -678,10 +784,11 @@ func (s *ServiceDNSReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 		}
 		return reconcile.Result{}, nil
 	}
-	routerRef, err := s.resolveRouterRef(ctx, service)
+	routerKey, err := s.resolveRouterRef(ctx, service)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+	routerRef := routerRefStorage(service.Namespace, routerKey)
 	address := service.Spec.ClusterIP
 	if service.Spec.Type == corev1.ServiceTypeNodePort {
 		var nodes corev1.NodeList
@@ -931,7 +1038,7 @@ func (s *ServiceDNSReconciler) cleanupDeletedServiceRoutes(ctx context.Context, 
 	if routerRef == "" {
 		return nil
 	}
-	err := withRouterConnections(ctx, s.Client, s.Factory, types.NamespacedName{Name: routerRef, Namespace: key.Namespace}, false, func(_ api.MikroTikRouter, connections []routerConnection) error {
+	err := withRouterConnections(ctx, s.Client, s.Factory, routerKeyFromRef(key.Namespace, routerRef), false, func(_ api.MikroTikRouter, connections []routerConnection) error {
 		return deleteManagedRoutes(ctx, connections, "clusterip-route", key.Name, key.Namespace)
 	})
 	if apierrors.IsNotFound(err) {
@@ -1900,10 +2007,7 @@ func acquireGeneratedChildClaims(
 	if err != nil {
 		return "", nil, err
 	}
-	release, err := generatedClaimFences.acquire(ctx, types.NamespacedName{
-		Namespace: owner.GetNamespace(),
-		Name:      resolvedRouter,
-	})
+	release, err := generatedClaimFences.acquire(ctx, resolvedRouter)
 	if err != nil {
 		return "", nil, err
 	}
@@ -1911,7 +2015,7 @@ func acquireGeneratedChildClaims(
 		ctx,
 		kube,
 		owner,
-		resolvedRouter,
+		routerRefStorage(owner.GetNamespace(), resolvedRouter),
 		publicIP,
 		dnsCandidates,
 		portForwardCandidates,
@@ -1973,7 +2077,7 @@ func preflightGeneratedChildClaims(
 		}
 	}
 
-	desiredRouterKey := owner.GetNamespace() + "/" + resolvedRouter
+	desiredRouterKey := canonicalRouterClaimKey(resolvedRouter)
 	var records api.MikroTikDNSRecordList
 	if err := kube.List(ctx, &records); err != nil {
 		return "", err
@@ -2069,7 +2173,7 @@ func preflightGeneratedChildClaims(
 			return "", generatedOwnershipConflict(owner, forward, fmt.Sprintf("port %s:%d/%s on Router %s", desiredPublicIP, candidate.externalPort, candidate.protocol, desiredRouterKey), ownerHasPortForwardClaim)
 		}
 	}
-	return resolvedRouter, nil
+	return routerRefStorage(owner.GetNamespace(), resolvedRouter), nil
 }
 
 func generatedClaimRouterRefs(ctx context.Context, kube client.Client, namespace string, object client.Object, additional ...string) ([]string, error) {
@@ -2082,12 +2186,29 @@ func generatedClaimRouterRefs(ctx context.Context, kube client.Client, namespace
 			}
 			return nil, err
 		}
-		refs = []string{resolved}
+		return []string{canonicalRouterClaimKey(resolved)}, nil
 	}
-	for index := range refs {
-		refs[index] = namespace + "/" + refs[index]
+	keys := make([]string, 0, len(refs))
+	seen := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		resolved, err := resolveRouterReference(ctx, kube, namespace, ref)
+		key := routerKeyFromRef(namespace, ref)
+		if err == nil {
+			key = resolved
+		} else if !apierrors.IsNotFound(err) && !errors.Is(err, errImplicitRouterSelection) {
+			return nil, err
+		}
+		canonical := canonicalRouterClaimKey(key)
+		if canonical == "" {
+			continue
+		}
+		if _, exists := seen[canonical]; exists {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		keys = append(keys, canonical)
 	}
-	return refs, nil
+	return keys, nil
 }
 
 type generatedClaimActor struct {
@@ -2255,7 +2376,7 @@ func preparePortForwardReconcileRequest(ctx context.Context, request portForward
 		if err != nil {
 			return request, err
 		}
-		request.routerRef = resolved
+		request.routerRef = routerRefStorage(request.namespace, resolved)
 	}
 	type publicMatchTarget struct {
 		service       types.NamespacedName
@@ -2398,28 +2519,29 @@ func reconcileServicePortForwards(ctx context.Context, request portForwardReconc
 	return nil
 }
 
-func (s *ServiceDNSReconciler) resolveRouterRef(ctx context.Context, service corev1.Service) (string, error) {
-	if routerRef := service.Annotations[api.RouterRefAnnotation]; routerRef != "" {
-		return routerRef, nil
+func (s *ServiceDNSReconciler) resolveRouterRef(ctx context.Context, service corev1.Service) (types.NamespacedName, error) {
+	key, err := resolveRouterReference(ctx, s.Client, service.Namespace, service.Annotations[api.RouterRefAnnotation])
+	if err == nil {
+		return key, nil
 	}
-	var routers api.MikroTikRouterList
-	if err := s.List(ctx, &routers, client.InNamespace(service.Namespace)); err != nil {
-		return "", err
+	if errors.Is(err, errImplicitRouterSelection) {
+		return types.NamespacedName{}, fmt.Errorf(
+			"service %s/%s has %s: %w; set %s",
+			service.Namespace,
+			service.Name,
+			api.DNSNameAnnotation,
+			err,
+			api.RouterRefAnnotation,
+		)
 	}
-	if len(routers.Items) == 1 {
-		return routers.Items[0].Name, nil
-	}
-	if len(routers.Items) == 0 {
-		return "", fmt.Errorf("service %s/%s has %s but no MikroTikRouter exists in its namespace; set %s", service.Namespace, service.Name, api.DNSNameAnnotation, api.RouterRefAnnotation)
-	}
-	return "", fmt.Errorf("service %s/%s has %s but multiple MikroTikRouters exist; set %s", service.Namespace, service.Name, api.DNSNameAnnotation, api.RouterRefAnnotation)
+	return types.NamespacedName{}, err
 }
 
 func (s *ServiceDNSReconciler) reconcileClusterRoute(ctx context.Context, service corev1.Service, routerRef string, present bool) error {
 	if routerRef == "" {
 		return nil
 	}
-	err := withRouterConnections(ctx, s.Client, s.Factory, types.NamespacedName{Name: routerRef, Namespace: service.Namespace}, present, func(router api.MikroTikRouter, connections []routerConnection) error {
+	err := withRouterConnections(ctx, s.Client, s.Factory, routerKeyFromRef(service.Namespace, routerRef), present, func(router api.MikroTikRouter, connections []routerConnection) error {
 		if !present {
 			return deleteServiceRoutes(ctx, service, connections, "clusterip-route", service.Name, service.Namespace)
 		}
@@ -2531,7 +2653,7 @@ func (r *RouteReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 		}
 		return reconcile.Result{}, nil
 	}
-	routerRef, err := resolveRouterReference(ctx, r.Client, route.Namespace, route.Spec.RouterRef)
+	routerKey, err := resolveRouterReference(ctx, r.Client, route.Namespace, route.Spec.RouterRef)
 	if err != nil {
 		if errors.Is(err, errImplicitRouterSelection) {
 			if route.Annotations[durableRouterTargetsAnnotation] == "" && route.Status.RouterRef != "" {
@@ -2559,6 +2681,7 @@ func (r *RouteReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 		}
 		return r.status(ctx, &route, err)
 	}
+	routerRef := routerRefStorage(route.Namespace, routerKey)
 	if route.Annotations[durableRouterTargetsAnnotation] != routerRef {
 		updated, err := persistDurableRouterTarget(ctx, r.Client, &route, route.Status.RouterRef, routerRef)
 		if err != nil {
@@ -2584,7 +2707,7 @@ func (r *RouteReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 		route.Status.Applied = false
 		return reconcile.Result{}, r.Status().Update(ctx, &route)
 	}
-	if err := withRouterConnections(ctx, r.Client, r.Factory, types.NamespacedName{Name: routerRef, Namespace: route.Namespace}, true, func(_ api.MikroTikRouter, connections []routerConnection) error {
+	if err := withRouterConnections(ctx, r.Client, r.Factory, routerKey, true, func(_ api.MikroTikRouter, connections []routerConnection) error {
 		for _, connection := range connections {
 			if err := connection.Client.EnsureRouteWithDistance(ctx, route.Spec.Destination, route.Spec.Gateway, route.Spec.Distance, comment); err != nil {
 				return err
@@ -2656,7 +2779,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req reconcile.Re
 		}
 		return reconcile.Result{}, nil
 	}
-	routerRef, err := resolveRouterReference(ctx, r.Client, rule.Namespace, rule.Spec.RouterRef)
+	routerKey, err := resolveRouterReference(ctx, r.Client, rule.Namespace, rule.Spec.RouterRef)
 	if err != nil {
 		if errors.Is(err, errImplicitRouterSelection) {
 			if rule.Annotations[durableRouterTargetsAnnotation] == "" && rule.Status.RouterRef != "" {
@@ -2684,6 +2807,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req reconcile.Re
 		}
 		return r.status(ctx, &rule, err)
 	}
+	routerRef := routerRefStorage(rule.Namespace, routerKey)
 	if rule.Annotations[durableRouterTargetsAnnotation] != routerRef {
 		updated, err := persistDurableRouterTarget(ctx, r.Client, &rule, rule.Status.RouterRef, routerRef)
 		if err != nil {
@@ -2724,7 +2848,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req reconcile.Re
 		LogPrefix:          rule.Spec.LogPrefix,
 		PlaceBefore:        rule.Spec.PlaceBefore,
 	}
-	if err := withRouterConnections(ctx, r.Client, r.Factory, types.NamespacedName{Name: routerRef, Namespace: rule.Namespace}, true, func(_ api.MikroTikRouter, connections []routerConnection) error {
+	if err := withRouterConnections(ctx, r.Client, r.Factory, routerKey, true, func(_ api.MikroTikRouter, connections []routerConnection) error {
 		for _, connection := range connections {
 			if err := connection.Client.EnsureFirewallRule(ctx, rosRule, comment); err != nil {
 				return err
@@ -2833,7 +2957,7 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 		}
 		return p.status(ctx, &o, fmt.Errorf("target address %q is not an IP", address))
 	}
-	routerRef, err := resolveRouterReference(ctx, p.Client, o.Namespace, o.Spec.RouterRef)
+	routerKey, err := resolveRouterReference(ctx, p.Client, o.Namespace, o.Spec.RouterRef)
 	if err != nil {
 		if !errors.Is(err, errImplicitRouterSelection) {
 			return reconcile.Result{}, err
@@ -2862,6 +2986,7 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 		}
 		return p.status(ctx, &o, err)
 	}
+	routerRef := routerRefStorage(o.Namespace, routerKey)
 	if o.Annotations[durableRouterTargetsAnnotation] != routerRef {
 		updated, err := persistDurableRouterTarget(ctx, p.Client, &o, o.Status.RouterRef, routerRef)
 		if err != nil {
@@ -2917,7 +3042,7 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 	defer releaseClaim()
 	comment := ros.ManagedComment("portforward", o.Name, o.Namespace)
 	firewallComment := ros.ManagedComment("portforward-firewall", o.Name, o.Namespace)
-	if err := withRouterConnections(ctx, p.Client, p.Factory, types.NamespacedName{Name: routerRef, Namespace: o.Namespace}, true, func(_ api.MikroTikRouter, connections []routerConnection) error {
+	if err := withRouterConnections(ctx, p.Client, p.Factory, routerKey, true, func(_ api.MikroTikRouter, connections []routerConnection) error {
 		for _, connection := range connections {
 			forward := ros.PortForward{
 				Protocol:     o.Spec.Protocol,
@@ -2957,7 +3082,7 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 }
 
 func (p *PortForwardReconciler) cleanupConfiguration(ctx context.Context, o *api.MikroTikPortForward, routerRef string) error {
-	err := withRouterConnections(ctx, p.Client, p.Factory, types.NamespacedName{Name: routerRef, Namespace: o.Namespace}, false, func(_ api.MikroTikRouter, connections []routerConnection) error {
+	err := withRouterConnections(ctx, p.Client, p.Factory, routerKeyFromRef(o.Namespace, routerRef), false, func(_ api.MikroTikRouter, connections []routerConnection) error {
 		for _, connection := range connections {
 			if err := connection.Client.DeletePortForward(ctx, ros.ManagedComment("portforward", o.Name, o.Namespace)); err != nil {
 				return err
