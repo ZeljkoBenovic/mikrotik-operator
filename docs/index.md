@@ -1,29 +1,45 @@
 ---
-layout: default
+layout: home
 title: MikroTik Kubernetes Operator
 description: Manage MikroTik RouterOS configuration from Kubernetes.
+hero:
+  name: MikroTik Kubernetes Operator
+  text: Manage RouterOS from Kubernetes
+  tagline: DNS, routes, port forwarding, and firewall rules on MikroTik RouterOS v6 and v7, from a local cluster such as k3s.
+  image:
+    src: /images/mikrotik-operator-banner.png
+    alt: Kubernetes Operator for MikroTik Routers
+    width: 640
+    height: 320
+  actions:
+    - theme: brand
+      text: Get started
+      link: /getting-started/
+    - theme: alt
+      text: GitHub
+      link: https://github.com/ZeljkoBenovic/mikrotik-operator
+features:
+  - icon: 📦
+    title: Install and configure
+    details: Install with Helm and connect a MikroTik RouterOS device.
+    link: /getting-started/
+    link_text: Installation guide
+  - icon: 🌐
+    title: Expose Services
+    details: Annotate a Service, Ingress, or HTTPRoute for DNS, routes, and NAT.
+    link: /how-to-expose-services/
+    link_text: Exposure guide
+  - icon: 🖥️
+    title: Admin UI
+    details: Optional panel for listing and creating MikroTik custom resources.
+    link: /admin-ui/
+    link_text: Admin UI
+  - icon: 📘
+    title: Reference
+    details: Annotations, custom resources, Helm values, and ownership comments.
+    link: /reference/
+    link_text: Reference
 ---
-
-![MikroTik Kubernetes Operator](images/mikrotik-operator-banner.png)
-
-# MikroTik Kubernetes Operator
-
-Manage DNS, routes, port forwarding, and firewall rules on MikroTik RouterOS
-from Kubernetes. The operator is designed for local clusters such as k3s,
-where a MikroTik router is the network gateway.
-
-It supports RouterOS v6 and v7, uses Kubernetes Secrets for credentials, and
-only changes RouterOS entries created and labeled by this operator.
-
-## Start here
-
-- [Install and configure the operator](getting-started.md)
-- [Expose a Service, Ingress, or HTTPRoute](how-to-expose-services.md)
-- [Optional admin UI](admin-ui.md)
-- [Resource and annotation reference](reference.md)
-- [Architecture and ownership model](architecture.md)
-- [How the operator works](how-it-works.md)
-- [Troubleshooting](troubleshooting.md)
 
 ## What it manages
 

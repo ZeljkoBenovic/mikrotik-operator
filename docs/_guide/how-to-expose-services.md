@@ -1,6 +1,9 @@
 ---
 layout: default
 title: Expose Services
+nav_order: 2
+redirect_from:
+  - /how-to-expose-services.html
 ---
 
 # Expose Services

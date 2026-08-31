@@ -1,6 +1,9 @@
 ---
 layout: default
 title: Reference
+nav_order: 1
+redirect_from:
+  - /reference.html
 ---
 
 # Reference
@@ -11,7 +14,7 @@ title: Reference
 | --- | --- | --- |
 | `mikrotik.operator.io/dns-name` | Service | Creates or updates an owned `MikroTikDNSRecord`. For ClusterIP Services, also creates owned `MikroTikRoute` objects (`/32` via node InternalIPs). |
 | `mikrotik.operator.io/public-ip` | Service, Ingress, HTTPRoute, `MikroTikPortForward` | Creates `dst-nat`/`src-nat` (and a forward filter rule) for selected TCP or UDP ports. The value must be an IP address. On a standalone port-forward CR it is the external address. |
-| `mikrotik.operator.io/router-ref` | Service, Ingress, HTTPRoute and custom resources | Selects a `MikroTikRouter` by name in the resource namespace, or as `namespace/name` for a router in another namespace. See [Architecture](architecture.md#router-selection). |
+| `mikrotik.operator.io/router-ref` | Service, Ingress, HTTPRoute and custom resources | Selects a `MikroTikRouter` by name in the resource namespace, or as `namespace/name` for a router in another namespace. See [Architecture]({% link _reference/architecture.md %}#router-selection). |
 | `mikrotik.operator.io/route-mode` | Service | `all-nodes` (default) or `single-node`. Other values are rejected. |
 
 The operator also writes `mikrotik.operator.io/router-targets` and
