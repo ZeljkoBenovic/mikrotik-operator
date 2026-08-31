@@ -15,7 +15,15 @@ var SchemeBuilder = runtime.NewSchemeBuilder(
 func AddToScheme(scheme *runtime.Scheme) error { return SchemeBuilder.AddToScheme(scheme) }
 
 func addKnownTypes(scheme *runtime.Scheme) error {
-	scheme.AddKnownTypes(GroupVersion, &MikroTikRouter{}, &MikroTikRouterList{}, &MikroTikDNSRecord{}, &MikroTikDNSRecordList{}, &MikroTikPortForward{}, &MikroTikPortForwardList{}, &MikroTikRoute{}, &MikroTikRouteList{}, &MikroTikFirewallRule{}, &MikroTikFirewallRuleList{})
+	scheme.AddKnownTypes(GroupVersion,
+		&MikroTikRouter{}, &MikroTikRouterList{},
+		&MikroTikDNSRecord{}, &MikroTikDNSRecordList{},
+		&MikroTikPortForward{}, &MikroTikPortForwardList{},
+		&MikroTikRoute{}, &MikroTikRouteList{},
+		&MikroTikFirewallRule{}, &MikroTikFirewallRuleList{},
+		&MikroTikBackup{}, &MikroTikBackupList{},
+		&MikroTikRestore{}, &MikroTikRestoreList{},
+	)
 	metav1.AddToGroupVersion(scheme, GroupVersion)
 	return nil
 }

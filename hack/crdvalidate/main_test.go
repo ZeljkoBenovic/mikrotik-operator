@@ -97,8 +97,8 @@ func TestValidatePathsAcceptsRepositoryCRDs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("validatePaths() error = %v", err)
 			}
-			if count != 5 {
-				t.Fatalf("validatePaths() count = %d, want 5", count)
+			if count != 7 {
+				t.Fatalf("validatePaths() count = %d, want 7", count)
 			}
 		})
 	}
@@ -250,6 +250,127 @@ func TestMikroTikPortForwardSchemaValidation(t *testing.T) {
 				celValidator,
 				"MikroTikPortForward",
 				portForwardSpec(test.targets),
+			)
+			if test.valid && len(validationErrors) > 0 {
+				t.Fatalf("valid object rejected: %v", validationErrors.ToAggregate())
+			}
+			if !test.valid && len(validationErrors) == 0 {
+				t.Fatal("invalid object accepted")
+			}
+		})
+	}
+}
+
+func TestMikroTikBackupSchemaValidation(t *testing.T) {
+	t.Parallel()
+
+	openAPIValidator, structural := repositoryCRDSchemaValidators(
+		t,
+		"mikrotik.operator.io_mikrotikbackups.yaml",
+	)
+	celValidator := cel.NewValidator(structural, true, celconfig.PerCallLimit)
+	if celValidator == nil {
+		t.Fatal("MikroTikBackup schema does not contain CEL validation rules")
+	}
+
+	tests := []struct {
+		name  string
+		spec  map[string]any
+		valid bool
+	}{
+		{name: "empty spec", spec: map[string]any{}},
+		{name: "blank routerRef", spec: map[string]any{"routerRef": ""}},
+		{name: "manual snapshot", valid: true, spec: map[string]any{"routerRef": "edge"}},
+		{name: "scheduled policy", valid: true, spec: map[string]any{
+			"routerRef": "edge",
+			"schedule":  "0 2 * * *",
+			"retention": int64(7),
+		}},
+		{name: "remote disabled", valid: true, spec: map[string]any{
+			"routerRef": "edge",
+			"remote":    map[string]any{"enabled": false},
+		}},
+		{name: "remote enabled", spec: map[string]any{
+			"routerRef": "edge",
+			"remote":    map[string]any{"enabled": true},
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			validationErrors := validateCustomResourceSpec(
+				t,
+				openAPIValidator,
+				structural,
+				celValidator,
+				"MikroTikBackup",
+				test.spec,
+			)
+			if test.valid && len(validationErrors) > 0 {
+				t.Fatalf("valid object rejected: %v", validationErrors.ToAggregate())
+			}
+			if !test.valid && len(validationErrors) == 0 {
+				t.Fatal("invalid object accepted")
+			}
+		})
+	}
+}
+
+func TestMikroTikRestoreSchemaValidation(t *testing.T) {
+	t.Parallel()
+
+	openAPIValidator, structural := repositoryCRDSchemaValidators(
+		t,
+		"mikrotik.operator.io_mikrotikrestores.yaml",
+	)
+	celValidator := cel.NewValidator(structural, true, celconfig.PerCallLimit)
+	if celValidator == nil {
+		t.Fatal("MikroTikRestore schema does not contain CEL validation rules")
+	}
+
+	tests := []struct {
+		name  string
+		spec  map[string]any
+		valid bool
+	}{
+		{name: "empty spec", spec: map[string]any{}},
+		{name: "backup only", spec: map[string]any{
+			"backupRef": map[string]any{"name": "once"},
+		}},
+		{name: "routerRef", valid: true, spec: map[string]any{
+			"backupRef": map[string]any{"name": "once"},
+			"routerRef": "edge",
+		}},
+		{name: "inline connection", valid: true, spec: map[string]any{
+			"backupRef": map[string]any{"name": "once"},
+			"connection": map[string]any{
+				"address":           "192.0.2.1",
+				"credentialsSecret": map[string]any{"name": "creds"},
+			},
+		}},
+		{name: "both targets", spec: map[string]any{
+			"backupRef": map[string]any{"name": "once"},
+			"routerRef": "edge",
+			"connection": map[string]any{
+				"address":           "192.0.2.1",
+				"credentialsSecret": map[string]any{"name": "creds"},
+			},
+		}},
+		{name: "connection missing secret", spec: map[string]any{
+			"backupRef":  map[string]any{"name": "once"},
+			"connection": map[string]any{"address": "192.0.2.1"},
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			validationErrors := validateCustomResourceSpec(
+				t,
+				openAPIValidator,
+				structural,
+				celValidator,
+				"MikroTikRestore",
+				test.spec,
 			)
 			if test.valid && len(validationErrors) > 0 {
 				t.Fatalf("valid object rejected: %v", validationErrors.ToAggregate())

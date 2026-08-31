@@ -15,6 +15,8 @@ and the project follows semantic versioning.
   the source for generated port-forward children.
 - Admin UI service and pod refs use searchable namespace-then-name
   dropdowns, backed by name-only list APIs.
+- `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.3.0`.
+  Operator `appVersion` remains `v0.2.0`.
 
 ### Fixed
 
@@ -60,7 +62,9 @@ and the project follows semantic versioning.
 - Improved repository guidance and AI-assisted contribution workflows.
 - Added grouped Dependabot updates for Go, GitHub Actions, and container images.
 
-## [0.3.0] - 2026-08-29
+## [0.3.0-pre] - 2026-08-29
+
+Historical pre-release notes from before the chart reached 0.3.0.
 
 ### Added
 
