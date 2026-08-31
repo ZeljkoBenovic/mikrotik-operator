@@ -71,11 +71,11 @@ Use the narrowest applicable skill first. Load referenced material only when the
 Run the checks relevant to the change, normally:
 
 ```sh
-gofmt -l cmd internal api
-go test ./...
-go vet ./...
+just fmt-check
+just test
+just vet
 go mod verify
-helm lint charts/mikrotik-operator
+just helm-lint
 helm template validation charts/mikrotik-operator --include-crds
 ```
 

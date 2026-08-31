@@ -112,7 +112,7 @@ kubectl -n mikrotik-operator-system port-forward \
   svc/mikrotik-operator-mikrotik-operator-ui 8080:8080
 ```
 
-On a Linux host, `make test-install-ui` installs K3s and the chart with the
+On a Linux host, `just test-install-ui` installs K3s and the chart with the
 UI enabled. See [`docs/admin-ui.md`](docs/admin-ui.md) for the full guide.
 
 ![Admin UI dashboard with per-kind counts and not-ready resources](docs/images/ui-dashboard.png)
@@ -182,36 +182,36 @@ Gateway and `HTTPRoute`.
 ## Local k3s testing
 
 Install a single-node K3s server and the operator chart on a Linux host
-(requires root, Helm, and kubectl):
+(requires [just](https://github.com/casey/just), root, Helm, and kubectl):
 
 ```sh
-make test-install
+just test-install
 ```
 
 To include the optional admin UI (no authentication; trusted networks only):
 
 ```sh
-make test-install-ui
+just test-install-ui
 ```
 
-`make test-install UI_ENABLED=true` does the same. After install, port-forward
+`just test-install true` does the same. After install, port-forward
 the UI Service as described in [`docs/admin-ui.md`](docs/admin-ui.md). Override
 `IMAGE_TAG` to pin operator and UI images together.
 
 On WSL2, Docker Desktop adds a `/Docker/host` mount whose options contain an
 unescaped space. Kubelet treats that as a fatal `/proc/mounts` parse error and
-K3s crash-loops. `make k3s-install` applies a systemd workaround that hides
-the mount from K3s only. k3d (used by `make e2e-test`) is unaffected because
+K3s crash-loops. `just k3s-install` applies a systemd workaround that hides
+the mount from K3s only. k3d (used by `just e2e-test`) is unaffected because
 it does not run kubelet on the WSL host.
 
 The full RouterOS-backed E2E test uses k3d, which runs K3s inside Docker, and
 the [`docker-routeros`](https://github.com/EvilFreelancer/docker-routeros)
 RouterOS QEMU image as a Docker container with its API published onto the k3d
-network. It requires Docker, k3d, kubectl, Helm, Go, and a Linux shell such as
+network. It requires [just](https://github.com/casey/just), Docker, k3d, kubectl, Helm, Go, and a Linux shell such as
 WSL:
 
 ```sh
-make e2e-test
+just e2e-test
 ```
 
 The test builds and imports the operator image, starts a disposable RouterOS
@@ -224,17 +224,21 @@ default. Override `E2E_ROUTER_IMAGE`, `E2E_CLUSTER_NAME`, or
 
 ## Development
 
+Install [`just`](https://github.com/casey/just), then run `just` to list
+recipes. Common checks:
+
 ```sh
-go test ./...
-go vet ./...
-go build ./cmd/manager
-go build ./cmd/ui-backend
-helm lint charts/mikrotik-operator
+just fmt-check
+just test
+just vet
+just build
+just helm-lint
+just ui-test
 helm template validation charts/mikrotik-operator --include-crds
 cd web/ui && npm ci && npm run build
 ```
 
-`make e2e-ui-test` installs the chart with the UI enabled on k3d and CRUDs
+`just e2e-ui-test` installs the chart with the UI enabled on k3d and CRUDs
 each CR over HTTP; it does not start RouterOS. Keep CRD YAML identical in
 `config/crd/bases` and `charts/mikrotik-operator/crds`.
 

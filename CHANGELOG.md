@@ -7,6 +7,13 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Replace GNU Make with [`just`](https://github.com/casey/just) for local and
+  CI recipes (`justfile`). CI installs a pinned `just` release and runs
+  `fmt-check`, `test`, `vet`, `build`, `helm-lint`, and the E2E suites through
+  the same recipes.
+
 ## [0.2.0] - 2026-08-31
 
 ### Added

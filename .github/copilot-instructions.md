@@ -18,18 +18,18 @@ example paths involved in the change.
 Use these commands before submitting a change:
 
 ```sh
-gofmt -w cmd internal api
-go test ./...
-go vet ./...
+just fmt-check
+just test
+just vet
 go mod verify
-helm lint charts/mikrotik-operator
+just helm-lint
 helm template validation charts/mikrotik-operator --include-crds
 kubectl kustomize config
 ```
 
-Use `go test -race ./...` when the environment has a working C compiler.
-RouterOS integration tests must remain separate from the default unit-test
-path and must not require credentials committed to the repository.
+`just test` already runs with `-race` and `-shuffle=on`. RouterOS integration
+tests must remain separate from the default unit-test path and must not
+require credentials committed to the repository.
 
 ## Go and controller conventions
 
@@ -86,7 +86,7 @@ path and must not require credentials committed to the repository.
 | New CLI flag | `cmd/manager/main.go`, Helm deployment template, raw deployment, values/documentation |
 | Helm value or template | `charts/mikrotik-operator`, README, rendered-resource validation, chart version in `Chart.yaml` |
 | Kubernetes watch or permission | controller setup, `config/rbac/role.yaml`, Helm RBAC templates, tests |
-| Release/image behavior | `.goreleaser.yaml`, `Dockerfile`, `Dockerfile.release`, `Dockerfile.ui`, `Dockerfile.ui.release`, `Makefile`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, README, `docs/getting-started.md` |
+| Release/image behavior | `.goreleaser.yaml`, `Dockerfile`, `Dockerfile.release`, `Dockerfile.ui`, `Dockerfile.ui.release`, `justfile`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, README, `docs/getting-started.md` |
 | Helm chart publishing | `charts/mikrotik-operator/Chart.yaml`, `.github/workflows/release-chart.yml`, README, `docs/getting-started.md` |
 | Operator behavior users hit | `docs/`, especially `docs/troubleshooting.md` and `docs/reference.md` |
 | Dependency update behavior | `go.mod`, `go.sum`, `Dockerfile`, `.github/workflows`, `.github/dependabot.yml`, CI validation |
