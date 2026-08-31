@@ -217,10 +217,14 @@ export type NamespacesResponse = {
   namespaces?: unknown
 }
 
-export type SecretsResponse = {
+export type NameListResponse = {
   items?: unknown
   secrets?: unknown
+  services?: unknown
+  pods?: unknown
 }
+
+export type SecretsResponse = NameListResponse
 
 export type ConfigResponse = {
   namespace?: string

@@ -5,9 +5,9 @@ import type {
   KindCount,
   ListResponse,
   NamespacesResponse,
+  NameListResponse,
   OverviewResponse,
   ResourceObject,
-  SecretsResponse,
 } from './types'
 
 export class ApiError extends Error {
@@ -154,6 +154,8 @@ export const queryKeys = {
   config: ['config'] as const,
   namespaces: ['namespaces'] as const,
   secrets: (namespace: string) => ['secrets', namespace] as const,
+  services: (namespace: string) => ['services', namespace] as const,
+  pods: (namespace: string) => ['pods', namespace] as const,
   resources: (kind: ApiKindSlug, namespace?: string) =>
     ['resources', kind, namespace || 'all'] as const,
   resource: (kind: ApiKindSlug, namespace: string, name: string) =>
@@ -175,8 +177,18 @@ export const api = {
   },
 
   secrets: async (namespace: string): Promise<string[]> => {
-    const raw = await request<SecretsResponse>(`/api/secrets/${encodeURIComponent(namespace)}`)
+    const raw = await request<NameListResponse>(`/api/secrets/${encodeURIComponent(namespace)}`)
     return asStringList(raw.items ?? raw.secrets).sort()
+  },
+
+  services: async (namespace: string): Promise<string[]> => {
+    const raw = await request<NameListResponse>(`/api/services/${encodeURIComponent(namespace)}`)
+    return asStringList(raw.items ?? raw.services).sort()
+  },
+
+  pods: async (namespace: string): Promise<string[]> => {
+    const raw = await request<NameListResponse>(`/api/pods/${encodeURIComponent(namespace)}`)
+    return asStringList(raw.items ?? raw.pods).sort()
   },
 
   listResources: async (kind: ApiKindSlug, namespace?: string): Promise<ResourceObject[]> => {

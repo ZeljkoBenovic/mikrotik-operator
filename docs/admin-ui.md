@@ -54,12 +54,13 @@ proxy sits in front of it.
 ## No authentication
 
 The UI has no login, TLS termination, or per-user authorization. Anyone who
-can reach the Service can list namespaces, list Secret names, and create or
-delete MikroTik custom resources.
+can reach the Service can list namespaces, list Secret, Service, and Pod
+names, and create or delete MikroTik custom resources.
 
 Use it only on a trusted network, or behind an authenticating reverse proxy.
 The UI container never returns Secret `data` or `stringData`; credential
-pickers show Secret names only.
+pickers show Secret names only. Service and Pod pickers likewise return names
+only.
 
 ## Owned resources are read-only
 
@@ -99,6 +100,6 @@ with the UI enabled, and exercises create/update/delete over HTTP. It does
 not start RouterOS.
 
 The backend allowlists five kinds (`mikrotikrouters`, `mikrotikdnsrecords`,
-`mikrotikroutes`, `mikrotikportforwards`, `mikrotikfirewallrules`). Secret
-list endpoints return names only. Update and delete of owned objects return
-HTTP 409 with a `managedBy` body.
+`mikrotikroutes`, `mikrotikportforwards`, `mikrotikfirewallrules`). Secret,
+Service, and Pod list endpoints return names only. Update and delete of owned
+objects return HTTP 409 with a `managedBy` body.
