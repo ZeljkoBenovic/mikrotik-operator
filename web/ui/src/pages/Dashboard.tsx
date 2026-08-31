@@ -6,6 +6,7 @@ import type { KindCount, ResourceObject } from '../api/types'
 import { ReadyBadge } from '../components/ReadyBadge'
 import { KINDS } from '../kinds'
 import type { OutletContext } from '../layout/AppLayout'
+import { LIVE_STATUS_SLOW_MS, liveListRefetchInterval } from '../utils/liveQuery'
 import { isReady, specSummary } from '../utils/resource'
 
 export function Dashboard() {
@@ -13,11 +14,13 @@ export function Dashboard() {
   const overview = useQuery({
     queryKey: [...queryKeys.overview, namespaceFilter ?? 'all'],
     queryFn: api.overview,
+    refetchInterval: LIVE_STATUS_SLOW_MS,
   })
   const lists = useQueries({
     queries: KINDS.map((kind) => ({
       queryKey: queryKeys.resources(kind.slug, namespaceFilter),
       queryFn: () => api.listResources(kind.slug, namespaceFilter),
+      refetchInterval: liveListRefetchInterval,
     })),
   })
 

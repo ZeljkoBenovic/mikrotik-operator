@@ -12,6 +12,7 @@ import { SpecSummary } from '../components/SpecSummary'
 import { YamlEditor } from '../components/YamlEditor'
 import type { KindConfig } from '../kinds'
 import { errorMessage } from '../utils/errors'
+import { liveResourceRefetchInterval } from '../utils/liveQuery'
 import { isManaged } from '../utils/resource'
 import { toYAML } from '../utils/yaml'
 
@@ -28,6 +29,7 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
     queryKey: queryKeys.resource(kind.slug, namespace, name),
     queryFn: () => api.getResource(kind.slug, namespace, name),
     enabled: Boolean(name),
+    refetchInterval: liveResourceRefetchInterval,
   })
 
   const remove = useMutation({

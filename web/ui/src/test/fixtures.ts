@@ -53,3 +53,23 @@ export function notReadyRoute(): ResourceObject {
     },
   }
 }
+
+export function portForward(overrides: Partial<ResourceObject> = {}): ResourceObject {
+  return {
+    apiVersion: 'mikrotik.operator.io/v1alpha1',
+    kind: 'MikroTikPortForward',
+    metadata: { name: 'web', namespace: 'app', resourceVersion: '1' },
+    spec: {
+      routerRef: 'edge',
+      protocol: 'tcp',
+      externalPort: 8443,
+      targetPort: 443,
+      targetAddress: '10.0.20.100',
+    },
+    status: {
+      applied: false,
+      conditions: [{ type: 'Ready', status: 'False', reason: 'Pending' }],
+    },
+    ...overrides,
+  }
+}
