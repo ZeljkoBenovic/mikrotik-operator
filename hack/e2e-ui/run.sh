@@ -21,7 +21,7 @@ cleanup() {
     if [ -n "${KUBECONFIG:-}" ]; then
       kubectl -n "$NAMESPACE" get deploy,svc,pods -l app.kubernetes.io/component=ui -o wide >&2 || true
       kubectl -n "$NAMESPACE" logs -l app.kubernetes.io/component=ui --tail=120 >&2 || true
-      kubectl -n "$WORKLOAD_NS" get mikrotikrouter,mikrotikdnsrecord,mikrotikroute,mikrotikportforward,mikrotikfirewallrule >&2 || true
+      kubectl -n "$WORKLOAD_NS" get svc,mikrotikrouter,mikrotikdnsrecord,mikrotikroute,mikrotikportforward,mikrotikfirewallrule >&2 || true
     fi
   fi
   if [ "${E2E_KEEP_ON_FAILURE:-}" != "1" ] || [ "$status" -eq 0 ]; then
@@ -73,6 +73,24 @@ stringData:
   username: admin
   password: super-secret-e2e
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: ${WORKLOAD_NS}
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+EOF
+
+# Kubernetes garbage-collects objects whose controller owner is missing.
+# Create Service/web first and reuse its UID so owned-dns is not orphaned.
+web_uid="$(kubectl -n "$WORKLOAD_NS" get svc web -o jsonpath='{.metadata.uid}')"
+test -n "$web_uid"
+
+kubectl apply -f - <<EOF
 apiVersion: mikrotik.operator.io/v1alpha1
 kind: MikroTikDNSRecord
 metadata:
@@ -82,12 +100,13 @@ metadata:
   - apiVersion: v1
     kind: Service
     name: web
-    uid: 00000000-0000-0000-0000-000000000001
+    uid: ${web_uid}
     controller: true
 spec:
   name: owned.e2e.home.arpa
   address: 10.99.0.8
 EOF
+kubectl -n "$WORKLOAD_NS" get mikrotikdnsrecord owned-dns >/dev/null
 
 ui_svc="$(kubectl -n "$NAMESPACE" get svc -l app.kubernetes.io/component=ui -o jsonpath='{.items[0].metadata.name}')"
 test -n "$ui_svc"
