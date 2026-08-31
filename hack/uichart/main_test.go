@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
       - name: ui
-        image: ghcr.io/zeljkobenovic/mikrotik-operator-ui:v0.1.1
+        image: ghcr.io/zeljkobenovic/mikrotik-operator-ui:v0.2.0
         args:
         - "-bind-address=:8080"
         - "-static-dir=/ui"

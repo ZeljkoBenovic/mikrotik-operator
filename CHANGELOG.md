@@ -7,12 +7,25 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-31
+
 ### Added
 
+- Owned `MikroTikRoute` custom resources for Service and Ingress annotation
+  routes, so generated `/32` routes stay Kubernetes-owned and read-only in the
+  admin UI.
+- Admin UI creates custom resources in the operator namespace and selects a
+  live router from a dropdown instead of free-typing `routerRef`.
 - Troubleshooting guide covering router selection, TLS API login, Ingress and
   HTTPRoute attachment, and admin UI ownership conflicts.
 - Router-selection, status, Helm value, and local UI development details in the
   existing architecture, reference, getting-started, and admin UI docs.
+
+### Changed
+
+- Default operator and admin UI image tag is `v0.2.0` (`Chart.yaml`
+  `appVersion`). Chart package version is `0.2.0`.
+- GitHub Actions, container base images, and admin UI npm dependencies.
 
 ## [0.1.1] - 2026-08-31
 
