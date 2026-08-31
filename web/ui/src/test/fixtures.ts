@@ -3,7 +3,6 @@ import { KINDS } from '../kinds'
 
 export const routerKind = KINDS[0]
 export const dnsKind = KINDS[1]
-export const portForwardKind = KINDS[3]
 
 export function standaloneRouter(overrides: Partial<ResourceObject> = {}): ResourceObject {
   return {

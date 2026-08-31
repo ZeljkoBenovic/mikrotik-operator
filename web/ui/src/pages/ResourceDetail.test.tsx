@@ -2,7 +2,10 @@ import { screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ResourceDetail } from './ResourceDetail'
 import { jsonResponse, renderWithProviders } from '../test/render'
-import { dnsKind, ownedDNS, portForward, portForwardKind } from '../test/fixtures'
+import { KINDS } from '../kinds'
+import { dnsKind, ownedDNS, portForward } from '../test/fixtures'
+
+const portForwardKind = KINDS[3]
 
 describe('ResourceDetail', () => {
   it('locks owned resources and shows the managed banner', async () => {
