@@ -112,6 +112,28 @@ creates DNS and routes only after all of the following are true:
 
 See [`examples/gateway-api.yaml`](https://github.com/ZeljkoBenovic/mikrotik-operator/blob/main/examples/gateway-api.yaml).
 
+## Standalone port forward
+
+Create a `MikroTikPortForward` when you want NAT without a Service annotation.
+`spec.destinationAddress` is the IP that initially receives the traffic
+(RouterOS `dst-address` on the dst-nat rule). Omit it to match any destination.
+
+```yaml
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikPortForward
+metadata:
+  name: web
+spec:
+  routerRef: home-router
+  protocol: tcp
+  externalPort: 443
+  targetPort: 8443
+  destinationAddress: 203.0.113.10
+  serviceRef:
+    namespace: default
+    name: web
+```
+
 ## Remove managed configuration
 
 Remove the annotation or delete the Kubernetes resource. The operator removes

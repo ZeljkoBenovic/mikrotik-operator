@@ -395,6 +395,7 @@ type recordingRouterClient struct {
 	deletedFirewall      int
 	ensuredRouteGateways []string
 	deletedRouteComments []string
+	ensuredPortForwards  []ros.PortForward
 }
 
 func (client *recordingRouterClient) EnsureDNS(context.Context, string, string, string, string) error {
@@ -406,8 +407,9 @@ func (client *recordingRouterClient) DeleteDNS(context.Context, string) error {
 	return nil
 }
 
-func (client *recordingRouterClient) EnsurePortForward(context.Context, ros.PortForward, string) error {
+func (client *recordingRouterClient) EnsurePortForward(_ context.Context, forward ros.PortForward, _ string) error {
 	client.ensuredForwards++
+	client.ensuredPortForwards = append(client.ensuredPortForwards, forward)
 	return nil
 }
 func (client *recordingRouterClient) DeletePortForward(context.Context, string) error {

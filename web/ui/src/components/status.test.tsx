@@ -35,6 +35,23 @@ describe('ManagedBadge and ManagedBanner', () => {
     expect(screen.getByText('Managed by Service/app/frontend')).toBeInTheDocument()
     expect(screen.getByText(/owning Service, Ingress, or HTTPRoute/)).toBeInTheDocument()
   })
+
+  it('truncates a long owner label inside the badge', () => {
+    const resource = ownedDNS()
+    resource.managedBy = {
+      apiVersion: 'v1',
+      kind: 'Service',
+      namespace: 'mikrotik-operator-system',
+      name: 'mikrotik-operator-mikrotik-operator-ui',
+    }
+    render(<ManagedBadge resource={resource} />)
+    const tag = screen.getByText(/Managed/)
+    expect(tag).toHaveClass('managed-badge')
+    expect(tag.parentElement).toHaveClass('managed-badge-wrap')
+    expect(tag).toHaveTextContent(
+      'Managed · Service/mikrotik-operator-system/mikrotik-operator-mikrotik-operator-ui',
+    )
+  })
 })
 
 describe('ConditionsTable', () => {

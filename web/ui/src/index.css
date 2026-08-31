@@ -1,12 +1,33 @@
 html,
 body,
-#root {
+#root,
+.ant-app {
   height: 100%;
   margin: 0;
 }
 
 body {
   background: #f4f6f8;
+}
+
+.managed-badge-wrap {
+  display: inline-block;
+  max-width: 100%;
+  min-width: 0;
+  vertical-align: bottom;
+}
+
+.managed-badge.ant-tag {
+  display: inline-block;
+  max-width: 100%;
+  margin-inline-end: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.ownership-cell {
+  overflow: hidden;
 }
 
 .app-sider-brand {

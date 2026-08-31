@@ -519,6 +519,97 @@ func TestEnsurePortForward_PlacesBeforeExistingChainID(t *testing.T) {
 	}
 }
 
+func TestEnsurePortForward_SetsDstAddressOnDstNat(t *testing.T) {
+	comment := ManagedComment("portforward", "web", "apps")
+	empty := &routeros.Reply{}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty},
+			{reply: empty},
+			{reply: empty},
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	err := api.EnsurePortForward(context.Background(), PortForward{
+		Protocol:     "tcp",
+		ExternalPort: 443,
+		Target:       "10.0.0.10",
+		TargetPort:   8443,
+		PublicIP:     "203.0.113.10",
+	}, comment)
+	if err != nil {
+		t.Fatalf("EnsurePortForward() error = %v", err)
+	}
+	found := false
+	for _, call := range client.calls {
+		if len(call) == 0 || call[0] != "/ip/firewall/nat/add" {
+			continue
+		}
+		chain := ""
+		dstAddress := ""
+		for _, arg := range call {
+			switch {
+			case strings.HasPrefix(arg, "=chain="):
+				chain = strings.TrimPrefix(arg, "=chain=")
+			case strings.HasPrefix(arg, "=dst-address="):
+				dstAddress = strings.TrimPrefix(arg, "=dst-address=")
+			}
+		}
+		if chain != "dstnat" {
+			continue
+		}
+		found = true
+		if dstAddress != "203.0.113.10" {
+			t.Fatalf("dst-nat dst-address = %q, want 203.0.113.10: %v", dstAddress, call)
+		}
+	}
+	if !found {
+		t.Fatal("dst-nat add was not issued")
+	}
+}
+
+func TestEnsurePortForward_OmitsDstAddressWhenEmpty(t *testing.T) {
+	comment := ManagedComment("portforward", "web", "apps")
+	empty := &routeros.Reply{}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty},
+			{reply: empty},
+			{reply: empty},
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	err := api.EnsurePortForward(context.Background(), PortForward{
+		Protocol:     "tcp",
+		ExternalPort: 443,
+		Target:       "10.0.0.10",
+		TargetPort:   8443,
+	}, comment)
+	if err != nil {
+		t.Fatalf("EnsurePortForward() error = %v", err)
+	}
+	for _, call := range client.calls {
+		if len(call) == 0 || call[0] != "/ip/firewall/nat/add" {
+			continue
+		}
+		chain := ""
+		for _, arg := range call {
+			if strings.HasPrefix(arg, "=chain=") {
+				chain = strings.TrimPrefix(arg, "=chain=")
+			}
+			if chain == "dstnat" && strings.HasPrefix(arg, "=dst-address=") {
+				t.Fatalf("empty destination still set %s", arg)
+			}
+		}
+	}
+}
+
 func newScriptedAPIClient(t *testing.T, scripted *scriptedRouterOSClient) *apiClient {
 	t.Helper()
 	clientConn, serverConn := net.Pipe()
