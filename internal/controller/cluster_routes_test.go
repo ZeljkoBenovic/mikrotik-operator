@@ -101,6 +101,13 @@ func TestClusterRouteGateways(t *testing.T) {
 			wantNotFound:   true,
 		},
 		{
+			name:           "resolves namespace/name routerRef in another namespace",
+			ownerNamespace: "app",
+			routerRef:      "edge/core",
+			objects:        []client.Object{&ownerRouter, &serviceNSRouter, &node},
+			want:           []string{"10.8.8.8"},
+		},
+		{
 			name:           "honors per-endpoint routeGateway",
 			ownerNamespace: "edge",
 			routerRef:      "core",
