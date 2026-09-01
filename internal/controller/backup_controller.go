@@ -613,6 +613,9 @@ func (r *RestoreReconciler) waitForConfirm(ctx context.Context, restore *api.Mik
 }
 
 func (r *RestoreReconciler) failRestore(ctx context.Context, restore *api.MikroTikRestore, err error) (reconcile.Result, error) {
+	if restore.Status.Applied {
+		return reconcile.Result{RequeueAfter: time.Minute}, nil
+	}
 	oldStatus := restore.Status
 	restore.Status.Applied = false
 	restore.Status.Conditions = readyCondition(restore.Status.Conditions, metav1.ConditionFalse, "ApplyFailed", err.Error())

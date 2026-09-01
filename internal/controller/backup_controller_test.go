@@ -822,6 +822,99 @@ func TestRestoreAppliedStaysAppliedWhenConfirmCleared(t *testing.T) {
 	}
 }
 
+func TestRestoreAppliedLookupFailureKeepsLatch(t *testing.T) {
+	tests := []struct {
+		name    string
+		objects func(router *api.MikroTikRouter, secret *corev1.Secret, backup *api.MikroTikBackup, restore *api.MikroTikRestore) []client.Object
+		getErr  error
+	}{
+		{
+			name: "missing backup",
+			objects: func(router *api.MikroTikRouter, secret *corev1.Secret, _ *api.MikroTikBackup, restore *api.MikroTikRestore) []client.Object {
+				return []client.Object{router, secret, restore}
+			},
+		},
+		{
+			name: "missing namespaced router",
+			objects: func(_ *api.MikroTikRouter, secret *corev1.Secret, backup *api.MikroTikBackup, restore *api.MikroTikRestore) []client.Object {
+				restore.Spec.RouterRef = "app/edge"
+				return []client.Object{secret, backup, restore}
+			},
+		},
+		{
+			name: "transient backup get error",
+			objects: func(router *api.MikroTikRouter, secret *corev1.Secret, backup *api.MikroTikBackup, restore *api.MikroTikRestore) []client.Object {
+				return []client.Object{router, secret, backup, restore}
+			},
+			getErr: fmt.Errorf("injected backup get failure"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := backupTestScheme(t)
+			router, secret := backupTestRouter()
+			backup := &api.MikroTikBackup{
+				ObjectMeta: metav1.ObjectMeta{Name: "once", Namespace: "app", UID: "backup-uid"},
+				Spec:       api.MikroTikBackupSpec{RouterRef: "edge"},
+				Status:     api.MikroTikBackupStatus{Export: "/ip dns\n"},
+			}
+			restore := &api.MikroTikRestore{
+				ObjectMeta: metav1.ObjectMeta{Name: "bring-up", Namespace: "app", Generation: 1},
+				Spec: api.MikroTikRestoreSpec{
+					BackupRef: api.NamespacedName{Name: "once"},
+					RouterRef: "edge",
+					Confirm:   api.RestoreConfirmValue,
+				},
+				Status: api.MikroTikRestoreStatus{
+					Applied:            true,
+					BackupUID:          "backup-uid",
+					Target:             "edge",
+					ObservedGeneration: 1,
+					Conditions: []metav1.Condition{{
+						Type:   "Ready",
+						Status: metav1.ConditionTrue,
+						Reason: "Applied",
+					}},
+				},
+			}
+			rosClient := &recordingRouterClient{}
+			base := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(tt.objects(router, secret, backup, restore)...).
+				WithStatusSubresource(&api.MikroTikRouter{}, &api.MikroTikBackup{}, &api.MikroTikRestore{}).
+				Build()
+			kube := client.Client(base)
+			if tt.getErr != nil {
+				kube = interceptor.NewClient(base, interceptor.Funcs{
+					Get: func(ctx context.Context, underlying client.WithWatch, key client.ObjectKey, object client.Object, opts ...client.GetOption) error {
+						if _, ok := object.(*api.MikroTikBackup); ok {
+							return tt.getErr
+						}
+						return underlying.Get(ctx, key, object, opts...)
+					},
+				})
+			}
+			reconciler := RestoreReconciler{Client: kube, Factory: backupFactory(rosClient)}
+			if _, err := reconciler.Reconcile(context.Background(), restoreRequest("bring-up")); err != nil {
+				t.Fatal(err)
+			}
+			if len(rosClient.imported) != 0 {
+				t.Fatalf("lookup failure re-imported: %#v", rosClient.imported)
+			}
+			var stored api.MikroTikRestore
+			if err := kube.Get(context.Background(), types.NamespacedName{Name: "bring-up", Namespace: "app"}, &stored); err != nil {
+				t.Fatal(err)
+			}
+			if !stored.Status.Applied {
+				t.Fatalf("lookup failure cleared applied: %#v", stored.Status)
+			}
+			if conditionReason(stored.Status.Conditions, "Ready") != "Applied" {
+				t.Fatalf("lookup failure changed ready: %#v", stored.Status.Conditions)
+			}
+		})
+	}
+}
+
 func TestRestoreUsesInactiveRouterRef(t *testing.T) {
 	scheme := backupTestScheme(t)
 	router, secret := backupTestRouter()
