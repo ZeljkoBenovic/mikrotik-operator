@@ -7,6 +7,12 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Admin UI resource updates keep the managed-config finalizer (and other
+  operator metadata) so a save followed by delete still cleans up RouterOS
+  DNS, NAT, route, and firewall entries.
+
 ## [0.3.0] - 2026-09-01
 
 ### Added
