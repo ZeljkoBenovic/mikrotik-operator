@@ -7,10 +7,17 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-01
+
 ### Fixed
 
 - Resolve `namespace/name` router refs to the namespaced `MikroTikRouter`
   object instead of treating the whole string as a resource name.
+
+### Changed
+
+- Default operator and admin UI image tag is `v0.4.0` (`Chart.yaml`
+  `appVersion`). Chart package version is `0.4.0`.
 
 ## [0.3.0] - 2026-09-01
 
