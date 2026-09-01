@@ -7,6 +7,23 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-01
+
+### Fixed
+
+- Admin UI resource updates keep the managed-config finalizer (and other
+  operator metadata) so a save followed by delete still cleans up RouterOS
+  DNS, NAT, route, and firewall entries.
+- Resolve `namespace/name` router refs to the namespaced `MikroTikRouter`
+  object instead of treating the whole string as a resource name.
+
+### Changed
+
+- Default operator and admin UI image tag is `v0.4.0` (`Chart.yaml`
+  `appVersion`). Chart package version is `0.4.0`.
+
+## [0.3.0] - 2026-09-01
+
 ### Added
 
 - Optional `spec.destinationAddress` on `MikroTikPortForward` sets RouterOS
@@ -20,6 +37,13 @@ and the project follows semantic versioning.
 
 - Admin UI shell fills the viewport height, and owned-resource labels
   ellipsize instead of overlapping row actions.
+
+### Changed
+
+- Default operator and admin UI image tag is `v0.3.0` (`Chart.yaml`
+  `appVersion`). Chart package version is `0.3.0`.
+- Public docs use a dark VitePress-styled GitHub Pages theme, with refreshed
+  Admin UI screenshots.
 
 ## [0.2.0] - 2026-08-31
 

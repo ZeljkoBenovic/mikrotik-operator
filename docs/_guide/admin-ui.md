@@ -13,13 +13,13 @@ custom resources: routers, DNS records, routes, port forwards, and firewall
 rules. The UI lists objects across namespaces, shows status conditions, and
 lets you create, edit, or delete standalone resources. New resources are
 always created in the operator namespace; the create form does not offer a
-namespace picker. The header filter still lists existing objects across
-namespaces, including generated resources owned by Services in other
-namespaces.
+namespace picker. The header namespace filter is searchable and still lists
+existing objects across namespaces, including generated resources owned by
+Services in other namespaces.
 
 The panel is disabled by default.
 
-![Admin UI dashboard with per-kind counts and not-ready resources]({{ '/images/ui-dashboard.png' | relative_url }})
+![Admin UI dashboard with per-kind counts including Routes and a not-ready resources table]({{ '/images/ui-dashboard.png' | relative_url }})
 
 ## Enable the UI
 
@@ -29,7 +29,7 @@ UI enabled. For an existing cluster:
 ```sh
 helm upgrade --install mikrotik-operator \
   oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator \
-  --version 0.2.0 \
+  --version 0.4.0 \
   --namespace mikrotik-operator-system \
   --create-namespace \
   --set ui.enabled=true
@@ -62,8 +62,20 @@ names, and create or delete MikroTik custom resources.
 
 Use it only on a trusted network, or behind an authenticating reverse proxy.
 The UI container never returns Secret `data` or `stringData`; credential
-pickers show Secret names only. Service and Pod pickers likewise return names
-only.
+pickers show Secret names only. Service and Pod pickers are searchable
+dropdowns and likewise return names only.
+
+## Lists and create
+
+List pages include a name/spec search box and a Create button. Ownership
+labels in the table are truncated with an ellipsis when they do not fit;
+hover the badge to read the full `Managed · Service/namespace/name` text.
+Port-forward creates include optional `spec.destinationAddress` (the IP that
+initially receives the traffic). Leave it empty to match any destination;
+annotated Services still use `public-ip` as the fallback when that field is
+empty.
+
+![DNS Records list with search, Create, a searchable namespace filter, and an ellipsized ownership badge]({{ '/images/ui-dns-records.png' | relative_url }})
 
 ## Owned resources are read-only
 
@@ -78,7 +90,7 @@ The UI treats owned resources as read-only:
 - The YAML view is read-only.
 - Direct update or delete requests are rejected.
 
-![Owned DNS record shown as read-only and managed by a Service]({{ '/images/ui-owned-dns-record.png' | relative_url }})
+![Owned DNS record shown as read-only with disabled Edit/Delete and a Managed by Service banner]({{ '/images/ui-owned-dns-record.png' | relative_url }})
 
 Change generated DNS records, routes, or port forwards on the owning
 Kubernetes resource, not in the UI. Standalone custom resources that you
