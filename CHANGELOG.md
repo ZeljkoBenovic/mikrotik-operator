@@ -12,6 +12,8 @@ and the project follows semantic versioning.
 - Admin UI resource updates keep the managed-config finalizer (and other
   operator metadata) so a save followed by delete still cleans up RouterOS
   DNS, NAT, route, and firewall entries.
+- Resolve `namespace/name` router refs to the namespaced `MikroTikRouter`
+  object instead of treating the whole string as a resource name.
 
 ## [0.3.0] - 2026-09-01
 
