@@ -185,7 +185,7 @@ unaffected.
 **Cause:** Chart package version and image tags are independent. An empty
 `image.tag` uses `Chart.yaml` `appVersion`.
 
-**Solution:** Pin `--set image.tag=v0.2.0` (and `ui.image.tag` when the UI is
+**Solution:** Pin `--set image.tag=v0.4.0` (and `ui.image.tag` when the UI is
 enabled), or set `image.digest`. See [Install and configure]({% link _guide/getting-started.md %}).
 
 **Verification:** `kubectl -n mikrotik-operator-system get pods -o jsonpath='{.items[*].spec.containers[*].image}'` shows the pinned tag or digest.
