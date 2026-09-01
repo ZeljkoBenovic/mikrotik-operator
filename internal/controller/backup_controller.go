@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -548,14 +549,18 @@ func (r *RestoreReconciler) importInline(ctx context.Context, restore api.MikroT
 		return "", err
 	}
 	var target string
-	err = routerOperationFences.withFence(ctx, fenceKey, func() error {
+	err = routerOperationFences.withFence(ctx, fenceKey, func() (operationErr error) {
 		client, err := r.Factory(ctx, conn.Address, conn.Port, conn.TLS, username, password)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = client.Close() }()
-		if err := client.Import(ctx, script); err != nil {
-			return err
+		defer func() {
+			if closeErr := client.Close(); closeErr != nil {
+				operationErr = errors.Join(operationErr, fmt.Errorf("close RouterOS client: %w", closeErr))
+			}
+		}()
+		if operationErr = client.Import(ctx, script); operationErr != nil {
+			return operationErr
 		}
 		target = conn.Address
 		return nil
