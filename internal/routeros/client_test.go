@@ -733,6 +733,23 @@ func TestEnsureDNS_AddsWhenMissingAndSkipsWhenMatching(t *testing.T) {
 	if got := client.calls[2]; len(got) == 0 || got[0] != "/ip/dns/static/add" {
 		t.Fatalf("create command = %v, want /ip/dns/static/add", client.calls[2])
 	}
+	for _, arg := range []string{
+		"=name=web.example.com",
+		"=address=10.0.0.8",
+		"=ttl=1h",
+		"=comment=" + comment,
+	} {
+		found := false
+		for _, got := range client.calls[2] {
+			if got == arg {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("add command %v missing %s", client.calls[2], arg)
+		}
+	}
 
 	if err := api.EnsureDNS(context.Background(), "web.example.com", "10.0.0.8", "1h", comment); err != nil {
 		t.Fatalf("EnsureDNS() skip error = %v", err)
@@ -801,6 +818,7 @@ func TestEnsureFirewallRule_AddsOptionalMatchersAndSkipsWhenMatching(t *testing.
 		"=dst-port=443",
 		"=connection-state=new",
 		"=log-prefix=web",
+		"=comment=" + comment,
 	}
 	for _, arg := range wantArgs {
 		found := false
@@ -828,46 +846,57 @@ func TestEnsureFirewallRule_AddsOptionalMatchersAndSkipsWhenMatching(t *testing.
 
 func TestDeleteManagedConfiguration_RemovesOnlyManagedComments(t *testing.T) {
 	managed := ManagedComment("dns", "web", "apps")
+	managedSentence := func(id string) *proto.Sentence {
+		return &proto.Sentence{Map: map[string]string{".id": id, "comment": managed}}
+	}
+	userSentence := func(id string) *proto.Sentence {
+		return &proto.Sentence{Map: map[string]string{".id": id, "comment": "user-static"}}
+	}
+	mixed := func(managedID, userID string) *routeros.Reply {
+		return &routeros.Reply{Re: []*proto.Sentence{managedSentence(managedID), userSentence(userID)}}
+	}
 	client := &scriptedRouterOSClient{
 		responses: []scriptedRouterOSResponse{
-			{reply: &routeros.Reply{Re: []*proto.Sentence{
-				{Map: map[string]string{".id": "*1", "comment": managed}},
-				{Map: map[string]string{".id": "*2", "comment": "user-static"}},
-			}}},
+			{reply: mixed("*1", "*2")},
 			{reply: &routeros.Reply{}},
-			{reply: emptyRouterOSReply()},
-			{reply: emptyRouterOSReply()},
-			{reply: emptyRouterOSReply()},
+			{reply: mixed("*3", "*4")},
+			{reply: &routeros.Reply{}},
+			{reply: mixed("*5", "*6")},
+			{reply: &routeros.Reply{}},
+			{reply: mixed("*7", "*8")},
+			{reply: &routeros.Reply{}},
 		},
 	}
 	api := newScriptedAPIClient(t, client)
 	if err := api.DeleteManagedConfiguration(context.Background()); err != nil {
 		t.Fatalf("DeleteManagedConfiguration() error = %v", err)
 	}
-	removed := 0
+	removed := []string{}
 	for _, call := range client.calls {
 		if len(call) == 0 || !strings.HasSuffix(call[0], "/remove") {
 			continue
 		}
-		removed++
-		foundManaged := false
+		id := ""
 		for _, arg := range call {
-			if arg == "=.id=*1" {
-				foundManaged = true
-			}
-			if arg == "=.id=*2" {
-				t.Fatalf("removed unmanaged entry: %v", call)
+			if strings.HasPrefix(arg, "=.id=") {
+				id = strings.TrimPrefix(arg, "=.id=")
 			}
 		}
-		if !foundManaged {
-			t.Fatalf("remove command %v did not target managed id *1", call)
-		}
+		removed = append(removed, id)
 	}
-	if removed != 1 {
-		t.Fatalf("remove commands = %d, want 1", removed)
+	if want := []string{"*1", "*3", "*5", "*7"}; !stringSliceEqual(removed, want) {
+		t.Fatalf("removed ids = %v, want %v", removed, want)
 	}
 }
 
-func emptyRouterOSReply() *routeros.Reply {
-	return &routeros.Reply{}
+func stringSliceEqual(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

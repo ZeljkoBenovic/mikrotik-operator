@@ -70,8 +70,15 @@ func TestFirewallRuleReconcilerAppliesSpecToRouterOS(t *testing.T) {
 	if got.SourceAddress != "10.0.0.0/24" || got.DestinationAddress != "10.0.0.20" || got.DestinationPort != "443" {
 		t.Fatalf("unexpected firewall matchers: %#v", got)
 	}
+	if len(got.ConnectionState) != 1 || got.ConnectionState[0] != "new" {
+		t.Fatalf("connection state = %#v, want [new]", got.ConnectionState)
+	}
 	if !got.PlaceBefore {
 		t.Fatal("PlaceBefore was not forwarded to RouterOS")
+	}
+	wantComment := ros.ManagedComment("firewall", rule.Name, rule.Namespace)
+	if len(routerClient.ensuredFirewallComments) != 1 || routerClient.ensuredFirewallComments[0] != wantComment {
+		t.Fatalf("managed comment = %#v, want %q", routerClient.ensuredFirewallComments, wantComment)
 	}
 	var stored api.MikroTikFirewallRule
 	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: rule.Namespace, Name: rule.Name}, &stored); err != nil {

@@ -122,7 +122,7 @@ func TestClusterRouteGateways(t *testing.T) {
 			want:           []string{"192.0.2.10"},
 		},
 		{
-			name:           "marks shared override and node gateway as both",
+			name:           "shared override and node gateway de-duplicates the hop",
 			ownerNamespace: "edge",
 			routerRef:      "core",
 			objects: []client.Object{

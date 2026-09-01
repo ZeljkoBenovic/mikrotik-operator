@@ -398,6 +398,7 @@ type recordingRouterClient struct {
 	deletedRouteComments    []string
 	ensuredPortForwards     []ros.PortForward
 	ensuredFirewallRules    []ros.FirewallRule
+	ensuredFirewallComments []string
 	deletedFirewallComments []string
 }
 
@@ -437,9 +438,10 @@ func (client *recordingRouterClient) DeleteRoutesByPrefix(context.Context, strin
 	return nil
 }
 
-func (client *recordingRouterClient) EnsureFirewallRule(_ context.Context, rule ros.FirewallRule, _ string) error {
+func (client *recordingRouterClient) EnsureFirewallRule(_ context.Context, rule ros.FirewallRule, comment string) error {
 	client.ensuredFirewall++
 	client.ensuredFirewallRules = append(client.ensuredFirewallRules, rule)
+	client.ensuredFirewallComments = append(client.ensuredFirewallComments, comment)
 	return nil
 }
 func (client *recordingRouterClient) DeleteFirewallRule(_ context.Context, comment string) error {
