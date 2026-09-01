@@ -27,6 +27,8 @@ var requiredCRDs = []string{
 	"mikrotikportforwards",
 	"mikrotikroutes",
 	"mikrotikfirewallrules",
+	"mikrotikbackups",
+	"mikrotikrestores",
 }
 
 var requiredVerbs = []string{"get", "list", "watch", "create", "update", "patch", "delete"}

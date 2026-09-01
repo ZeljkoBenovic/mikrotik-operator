@@ -13,6 +13,8 @@ const (
 	kindRoutes        = "mikrotikroutes"
 	kindPortForwards  = "mikrotikportforwards"
 	kindFirewallRules = "mikrotikfirewallrules"
+	kindBackups       = "mikrotikbackups"
+	kindRestores      = "mikrotikrestores"
 
 	readyConditionType = "Ready"
 )
@@ -24,6 +26,8 @@ var kindOrder = []string{
 	kindRoutes,
 	kindPortForwards,
 	kindFirewallRules,
+	kindBackups,
+	kindRestores,
 }
 
 type kindSpec struct {
@@ -90,6 +94,28 @@ var kinds = map[string]kindSpec{
 		newList:   func() client.ObjectList { return &api.MikroTikFirewallRuleList{} },
 		conditionsOf: func(obj client.Object) []metav1.Condition {
 			return objectConditions(obj, func(o *api.MikroTikFirewallRule) []metav1.Condition {
+				return o.Status.Conditions
+			})
+		},
+	},
+	kindBackups: {
+		plural:    kindBackups,
+		gvk:       gvk("MikroTikBackup"),
+		newObject: func() client.Object { return &api.MikroTikBackup{} },
+		newList:   func() client.ObjectList { return &api.MikroTikBackupList{} },
+		conditionsOf: func(obj client.Object) []metav1.Condition {
+			return objectConditions(obj, func(o *api.MikroTikBackup) []metav1.Condition {
+				return o.Status.Conditions
+			})
+		},
+	},
+	kindRestores: {
+		plural:    kindRestores,
+		gvk:       gvk("MikroTikRestore"),
+		newObject: func() client.Object { return &api.MikroTikRestore{} },
+		newList:   func() client.ObjectList { return &api.MikroTikRestoreList{} },
+		conditionsOf: func(obj client.Object) []metav1.Condition {
+			return objectConditions(obj, func(o *api.MikroTikRestore) []metav1.Condition {
 				return o.Status.Conditions
 			})
 		},

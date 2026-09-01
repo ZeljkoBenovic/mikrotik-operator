@@ -69,18 +69,37 @@ address, port, protocol, state, interface, logging, or `placeBefore` fields.
 `placeBefore: true` inserts the rule before the first existing rule in that
 chain when the table is not empty.
 
+### `MikroTikBackup`
+
+Takes a text RouterOS `/export` through an existing `MikroTikRouter`. Empty
+`spec.schedule` captures one snapshot into `status.export`. A cron
+`spec.schedule` is a policy that owns snapshot children and prunes them to
+`spec.retention`. See [Backup and restore]({% link _guide/backup-restore.md %}).
+
+### `MikroTikRestore`
+
+Applies `status.export` from a `MikroTikBackup`. Target is `spec.routerRef`
+or inline `spec.connection` (address plus Secret). `/import` waits until
+`spec.confirm` is `RESTORE`.
+
 ## Status and conditions
 
-Each CR has one `Ready` condition.
+Each CR has a `Ready` condition. Backups and restores may also set
+`RemoteStorageNotImplemented`.
 
 | Kind | Ready reason | Meaning |
 | --- | --- | --- |
 | `MikroTikRouter` | `Connected` / `ConnectionFailed` | API dial and login |
 | Other CRs | `Applied` / `ApplyFailed` | Last RouterOS apply |
+| `MikroTikBackup` | `Captured` / `Scheduled` / `ApplyFailed` / `RemoteStorageNotImplemented` | Snapshot stored, policy active, or remote stub rejected |
+| `MikroTikRestore` | `WaitingForConfirmation` / `Applied` / `ApplyFailed` | Confirm gate or `/import` |
 
 `status.applied` is true after a successful apply. `status.routerRef` stores
 the selected router as `name` when it is in the resource namespace, otherwise
-`namespace/name`.
+`namespace/name`. Backup snapshots store `status.export` (secrets may be
+present; list APIs omit it). Restores stay `WaitingForConfirmation` until
+`spec.confirm` is `RESTORE`. `/import` does not reset the device. Backup and
+Restore objects have no finalizers. See [Backup and restore]({% link _guide/backup-restore.md %}).
 
 ## Helm values
 

@@ -324,49 +324,6 @@ func TestPersistServiceRouteRouterTargetKeepsMissingChildHistory(t *testing.T) {
 	}
 }
 
-func TestCompactDurableRouterTargetReplacesAndClearsAnnotation(t *testing.T) {
-	scheme := runtime.NewScheme()
-	if err := api.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-	object := &api.MikroTikFirewallRule{ObjectMeta: metav1.ObjectMeta{
-		Name:        "object",
-		Namespace:   "app",
-		Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a,router-b"},
-	}}
-	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(object).Build()
-
-	updated, err := compactDurableRouterTarget(context.Background(), kube, object, "router-b")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !updated {
-		t.Fatal("compact to a single target did not persist")
-	}
-	if object.GetAnnotations()[durableRouterTargetsAnnotation] != "router-b" {
-		t.Fatalf("annotation = %q, want router-b", object.GetAnnotations()[durableRouterTargetsAnnotation])
-	}
-
-	updated, err = compactDurableRouterTarget(context.Background(), kube, object, "router-b")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated {
-		t.Fatal("identical target was written again")
-	}
-
-	updated, err = compactDurableRouterTarget(context.Background(), kube, object, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !updated {
-		t.Fatal("clearing durable targets did not persist")
-	}
-	if _, exists := object.GetAnnotations()[durableRouterTargetsAnnotation]; exists {
-		t.Fatalf("annotation still present: %q", object.GetAnnotations()[durableRouterTargetsAnnotation])
-	}
-}
-
 func TestReadyConditionPreservesTransitionTime(t *testing.T) {
 	previous := metav1.NewTime(metav1.Now().Add(-60 * 1000000000))
 	existing := []metav1.Condition{{

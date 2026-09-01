@@ -38,6 +38,18 @@ export function formFromResource(kind: KindConfig, resource: ResourceObject): Ed
       spec.targetType = 'address'
     }
   }
+  if (kind.apiKind === 'MikroTikBackup') {
+    spec.backupMode = typeof spec.schedule === 'string' && spec.schedule.trim() !== '' ? 'schedule' : 'once'
+  }
+  if (kind.apiKind === 'MikroTikRestore') {
+    const connection = asRecord(spec.connection)
+    spec.targetType = typeof connection.address === 'string' && connection.address ? 'connection' : 'router'
+    if (spec.targetType === 'connection') {
+      spec.connection = { ...connection, tls: Boolean(connection.tls) }
+    }
+    // Confirmation is an explicit action on the resource page, never an edit-form value.
+    delete spec.confirm
+  }
   return {
     name: resource.metadata.name,
     namespace: resource.metadata.namespace || 'default',
@@ -58,6 +70,13 @@ export function emptyForm(kind: KindConfig, namespace: string): EditorFormValues
   if (kind.apiKind === 'MikroTikFirewallRule') {
     spec.chain = 'forward'
     spec.action = 'accept'
+  }
+  if (kind.apiKind === 'MikroTikBackup') {
+    spec.backupMode = 'once'
+  }
+  if (kind.apiKind === 'MikroTikRestore') {
+    spec.targetType = 'router'
+    spec.connection = { tls: true }
   }
   return {
     name: '',
@@ -95,6 +114,24 @@ export function resourceFromForm(kind: KindConfig, values: EditorFormValues): Re
     }
     if (!spec.destinationAddress) {
       delete spec.destinationAddress
+    }
+  }
+  if (kind.apiKind === 'MikroTikBackup') {
+    if (spec.backupMode !== 'schedule') {
+      delete spec.schedule
+      delete spec.retention
+    }
+    delete spec.backupMode
+  }
+  if (kind.apiKind === 'MikroTikRestore') {
+    const targetType = spec.targetType
+    delete spec.targetType
+    // Editing a restore must never retain confirmation from YAML or hidden form state.
+    delete spec.confirm
+    if (targetType === 'connection') {
+      delete spec.routerRef
+    } else {
+      delete spec.connection
     }
   }
   delete spec._namespace

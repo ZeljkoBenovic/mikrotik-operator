@@ -79,6 +79,8 @@ func TestOverviewCounts(t *testing.T) {
 		kindRoutes:        {Kind: kindRoutes},
 		kindPortForwards:  {Kind: kindPortForwards},
 		kindFirewallRules: {Kind: kindFirewallRules},
+		kindBackups:       {Kind: kindBackups},
+		kindRestores:      {Kind: kindRestores},
 	}
 	for i, raw := range kinds {
 		item := asMap(t, raw)

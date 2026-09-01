@@ -92,3 +92,7 @@ ui:
       memory: 128Mi
   rbac:
     create: true
+
+# Backup and restore CRs are always reconciled when present. There is no Helm
+# flag for them. See docs/backup-restore.md. spec.remote.enabled must stay
+# false until remote FTP/SMB/S3 storage is implemented.

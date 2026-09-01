@@ -555,14 +555,16 @@ func resolveRouterReference(ctx context.Context, kube client.Client, namespace, 
 	hintNamespace, name := splitRouterReference(reference)
 	if name != "" && hintNamespace != "" {
 		key := types.NamespacedName{Namespace: hintNamespace, Name: name}
-		if _, err := getMikroTikRouter(ctx, kube, key); err != nil {
+		var router api.MikroTikRouter
+		if err := kube.Get(ctx, key, &router); err != nil {
 			return types.NamespacedName{}, err
 		}
 		return key, nil
 	}
 	if name != "" {
 		local := types.NamespacedName{Namespace: namespace, Name: name}
-		_, err := getMikroTikRouter(ctx, kube, local)
+		var router api.MikroTikRouter
+		err := kube.Get(ctx, local, &router)
 		if err == nil {
 			return local, nil
 		}
@@ -3138,6 +3140,12 @@ func Setup(mgr ctrl.Manager, factory ros.Factory, gatewayAPIEnabled bool, gatewa
 		return err
 	}
 	if err := (&FirewallRuleReconciler{Client: mgr.GetClient(), Factory: factory}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	if err := (&BackupReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Factory: factory}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	if err := (&RestoreReconciler{Client: mgr.GetClient(), Factory: factory}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	return (&PortForwardReconciler{Client: mgr.GetClient(), Factory: factory}).SetupWithManager(mgr)

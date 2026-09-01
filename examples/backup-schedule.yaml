@@ -1,0 +1,11 @@
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikBackup
+metadata:
+  name: edge-nightly
+  namespace: default
+spec:
+  routerRef: local-router
+  schedule: "0 2 * * *"
+  retention: 7
+  remote:
+    enabled: false

@@ -211,6 +211,7 @@ func (h *handler) listResources(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		stripListStatus(spec.plural, annotated)
 		items = append(items, annotated)
 	}
 	writeJSON(w, http.StatusOK, listResponse{Items: items})
@@ -279,7 +280,6 @@ func (h *handler) updateResource(w http.ResponseWriter, r *http.Request) {
 	if obj.GetResourceVersion() == "" {
 		obj.SetResourceVersion(existing.GetResourceVersion())
 	}
-	preserveManagedMetadata(existing, obj)
 	if err := h.kube.Update(r.Context(), obj); err != nil {
 		h.writeKubeError(w, err)
 		return
@@ -330,23 +330,6 @@ func (h *handler) lookupObject(w http.ResponseWriter, r *http.Request) (kindSpec
 	obj.SetNamespace(namespace)
 	obj.SetName(name)
 	return spec, obj, true
-}
-
-// preserveManagedMetadata keeps operator-owned metadata on a spec replace.
-// The admin UI PUT body is spec-only, so a naive Update would drop the
-// managed-config finalizer and skip RouterOS cleanup on the next delete.
-func preserveManagedMetadata(existing, obj client.Object) {
-	obj.SetUID(existing.GetUID())
-	obj.SetCreationTimestamp(existing.GetCreationTimestamp())
-	obj.SetGeneration(existing.GetGeneration())
-	obj.SetFinalizers(existing.GetFinalizers())
-	obj.SetOwnerReferences(existing.GetOwnerReferences())
-	if len(obj.GetAnnotations()) == 0 {
-		obj.SetAnnotations(existing.GetAnnotations())
-	}
-	if len(obj.GetLabels()) == 0 {
-		obj.SetLabels(existing.GetLabels())
-	}
 }
 
 func (h *handler) decodeObject(w http.ResponseWriter, r *http.Request, spec kindSpec) (client.Object, bool) {
@@ -454,4 +437,15 @@ func pathInside(root, target string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func stripListStatus(kind string, annotated map[string]any) {
+	if kind != kindBackups {
+		return
+	}
+	status, ok := annotated["status"].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(status, "export")
 }

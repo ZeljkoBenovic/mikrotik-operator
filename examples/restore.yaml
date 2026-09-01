@@ -1,0 +1,12 @@
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikRestore
+metadata:
+  name: edge-rollback
+  namespace: default
+spec:
+  backupRef:
+    name: edge-now
+  routerRef: local-router
+  # Uncomment after reviewing the snapshot. Restores do nothing until this
+  # exact value is set. The admin UI Confirm restore dialog sets it for you.
+  # confirm: RESTORE

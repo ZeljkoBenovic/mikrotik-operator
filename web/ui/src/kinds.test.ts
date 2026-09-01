@@ -2,13 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { KINDS, kindFromPath } from './kinds'
 
 describe('kind registry', () => {
-  it('covers the five CRDs with stable slugs and routes', () => {
+  it('covers the CRDs with stable slugs and routes', () => {
     expect(KINDS.map((kind) => kind.slug)).toEqual([
       'mikrotikrouters',
       'mikrotikdnsrecords',
       'mikrotikroutes',
       'mikrotikportforwards',
       'mikrotikfirewallrules',
+      'mikrotikbackups',
+      'mikrotikrestores',
     ])
     expect(KINDS.map((kind) => kind.path)).toEqual([
       '/routers',
@@ -16,6 +18,8 @@ describe('kind registry', () => {
       '/routes',
       '/port-forwards',
       '/firewall-rules',
+      '/backups',
+      '/restores',
     ])
   })
 

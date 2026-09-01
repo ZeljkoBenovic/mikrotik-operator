@@ -25,6 +25,8 @@ type Client interface {
 	DeleteRoutesByPrefix(context.Context, string) error
 	EnsureFirewallRule(context.Context, FirewallRule, string) error
 	DeleteFirewallRule(context.Context, string) error
+	Export(context.Context) (string, error)
+	Import(context.Context, string) error
 	Close() error
 }
 type FirewallRule struct {
@@ -72,6 +74,11 @@ type apiClient struct {
 const (
 	managedCommentPrefix     = "managed-by=mikrotik-operator"
 	routerOSOperationTimeout = 15 * time.Second
+	routerOSBackupTimeout    = 60 * time.Second
+	restoreFileName          = "mikrotik-operator-restore.rsc"
+	// RouterOS rejects /file/set contents= above ~4095 bytes on v6 and ~60KiB
+	// on v7. Chunk under the v6 cap so a 1MiB export can restore on both.
+	maxRestoreFileContentsBytes = 4095
 )
 
 func Dial(ctx context.Context, address string, port int32, useTLS bool, username, password string) (Client, error) {
@@ -168,10 +175,17 @@ func (a *apiClient) runContext(ctx context.Context, sentences ...string) (*route
 }
 
 func (a *apiClient) runArgsContext(ctx context.Context, sentences []string) (*routeros.Reply, error) {
+	timeout := a.operationTimeout
+	if timeout <= 0 {
+		timeout = routerOSOperationTimeout
+	}
+	return a.runArgsContextTimeout(ctx, timeout, sentences)
+}
+
+func (a *apiClient) runArgsContextTimeout(ctx context.Context, timeout time.Duration, sentences []string) (*routeros.Reply, error) {
 	a.operationMu.Lock()
 	defer a.operationMu.Unlock()
 
-	timeout := a.operationTimeout
 	if timeout <= 0 {
 		timeout = routerOSOperationTimeout
 	}

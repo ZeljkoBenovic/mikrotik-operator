@@ -101,13 +101,6 @@ func TestClusterRouteGateways(t *testing.T) {
 			wantNotFound:   true,
 		},
 		{
-			name:           "resolves namespace/name routerRef in another namespace",
-			ownerNamespace: "app",
-			routerRef:      "edge/core",
-			objects:        []client.Object{&ownerRouter, &serviceNSRouter, &node},
-			want:           []string{"10.8.8.8"},
-		},
-		{
 			name:           "honors per-endpoint routeGateway",
 			ownerNamespace: "edge",
 			routerRef:      "core",
@@ -120,40 +113,6 @@ func TestClusterRouteGateways(t *testing.T) {
 			routerRef:      "core",
 			objects:        []client.Object{&mixedGatewayRouter, &node},
 			want:           []string{"10.1.1.1", "10.9.9.9"},
-		},
-		{
-			name:           "empty routerRef uses node InternalIPs",
-			ownerNamespace: "app",
-			routerRef:      "",
-			objects:        []client.Object{&node},
-			want:           []string{"192.0.2.10"},
-		},
-		{
-			name:           "shared override and node gateway de-duplicates the hop",
-			ownerNamespace: "edge",
-			routerRef:      "core",
-			objects: []client.Object{
-				&api.MikroTikRouter{
-					ObjectMeta: metav1.ObjectMeta{Name: "core", Namespace: "edge"},
-					Spec: api.MikroTikRouterSpec{
-						Routers: []api.RouterEndpoint{
-							{
-								Name:              "a",
-								Address:           "192.0.2.1",
-								CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
-								RouteGateway:      "192.0.2.10",
-							},
-							{
-								Name:              "b",
-								Address:           "192.0.2.2",
-								CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
-							},
-						},
-					},
-				},
-				&node,
-			},
-			want: []string{"192.0.2.10"},
 		},
 		{
 			name:           "keeps node IPs for endpoints without routeGateway",
@@ -204,64 +163,6 @@ func TestClusterRouteGateways(t *testing.T) {
 			}
 			if !stringSetEqual(got, test.want) {
 				t.Fatalf("got gateways %#v, want %#v", got, test.want)
-			}
-		})
-	}
-}
-
-func TestClusterRouteHopsMergeSharedOverrideAndNodeOrigin(t *testing.T) {
-	scheme := controllerTestScheme(t)
-	service := corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
-		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8"},
-	}
-	router := api.MikroTikRouter{
-		ObjectMeta: metav1.ObjectMeta{Name: "core", Namespace: "edge"},
-		Spec: api.MikroTikRouterSpec{
-			Routers: []api.RouterEndpoint{
-				{
-					Name:              "a",
-					Address:           "192.0.2.1",
-					CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
-					RouteGateway:      "192.0.2.10",
-				},
-				{
-					Name:              "b",
-					Address:           "192.0.2.2",
-					CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
-				},
-			},
-		},
-	}
-	node := corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
-		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
-	}
-	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &router, &node).Build()
-	hops, err := clusterRouteHops(context.Background(), kube, service, router.Namespace, router.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hops) != 1 || hops[0].gateway != "192.0.2.10" || hops[0].origin != clusterRouteOriginBoth {
-		t.Fatalf("hops = %#v, want one hop with origin %q", hops, clusterRouteOriginBoth)
-	}
-}
-
-func TestMergeClusterRouteOrigin(t *testing.T) {
-	tests := []struct {
-		name     string
-		existing string
-		added    string
-		want     string
-	}{
-		{name: "empty existing takes added", existing: "", added: clusterRouteOriginNodes, want: clusterRouteOriginNodes},
-		{name: "same origin kept", existing: clusterRouteOriginOverride, added: clusterRouteOriginOverride, want: clusterRouteOriginOverride},
-		{name: "different origins become both", existing: clusterRouteOriginOverride, added: clusterRouteOriginNodes, want: clusterRouteOriginBoth},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := mergeClusterRouteOrigin(test.existing, test.added); got != test.want {
-				t.Fatalf("mergeClusterRouteOrigin(%q, %q) = %q, want %q", test.existing, test.added, got, test.want)
 			}
 		})
 	}

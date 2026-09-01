@@ -19,3 +19,30 @@ func readyCondition(
 		LastTransitionTime: transition,
 	}}
 }
+
+func conditionStatusOf(conditions []metav1.Condition, typeName string) metav1.ConditionStatus {
+	for _, condition := range conditions {
+		if condition.Type == typeName {
+			return condition.Status
+		}
+	}
+	return ""
+}
+
+func conditionReasonOf(conditions []metav1.Condition, typeName string) string {
+	for _, condition := range conditions {
+		if condition.Type == typeName {
+			return condition.Reason
+		}
+	}
+	return ""
+}
+
+func conditionMessageOf(conditions []metav1.Condition, typeName string) string {
+	for _, condition := range conditions {
+		if condition.Type == typeName {
+			return condition.Message
+		}
+	}
+	return ""
+}

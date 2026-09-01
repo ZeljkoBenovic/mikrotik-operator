@@ -11,6 +11,7 @@ redirect_from:
 The operator is a stand-alone Go application built with controller-runtime.
 It watches Kubernetes resources, calculates desired RouterOS state, and sends
 RouterOS API commands through one or more configured router endpoints.
+Backup and restore are documented in [Backup and restore]({% link _guide/backup-restore.md %}).
 
 ## Reconciliation flow
 
@@ -91,3 +92,17 @@ or behind an authenticating proxy.
 
 See [How the operator works]({% link _reference/how-it-works.md %}) for controller names and the
 contributor checklist when adding a managed capability.
+
+## Backup and restore
+
+`MikroTikBackup` and `MikroTikRestore` use the same RouterOS client as the
+managed-comment reconcilers. Backups resolve an existing `MikroTikRouter` and
+store text `/export` output on the snapshot object. A nonempty `spec.schedule`
+makes that object a policy: it owns snapshot children of the same kind and
+prunes them to `spec.retention`. Restores wait for `spec.confirm: RESTORE`,
+then `/import` onto a `MikroTikRouter` or an inline address plus Secret.
+`/import` does not reset the device. Use restore on an empty router; existing
+objects may fail with `already have such`.
+
+Remote FTP/SMB/S3 fields are reserved. Enabling `spec.remote.enabled` is
+rejected. See [Backup and restore]({% link _guide/backup-restore.md %}).

@@ -1,5 +1,5 @@
-import { App, Button, Card, Descriptions, Space, Tabs, Typography } from 'antd'
-import { ArrowLeftOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons'
+import { App, Button, Card, Descriptions, Input, Modal, Space, Tabs, Typography } from 'antd'
+import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, WarningOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -13,7 +13,7 @@ import { YamlEditor } from '../components/YamlEditor'
 import type { KindConfig } from '../kinds'
 import { errorMessage } from '../utils/errors'
 import { liveResourceRefetchInterval } from '../utils/liveQuery'
-import { isManaged } from '../utils/resource'
+import { isManaged, isReadOnly, toSubmitBody } from '../utils/resource'
 import { toYAML } from '../utils/yaml'
 
 export function ResourceDetail({ kind }: { kind: KindConfig }) {
@@ -24,6 +24,8 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
   const namespace = params.namespace ?? 'default'
   const name = params.name ?? ''
   const [editing, setEditing] = useState(false)
+  const [confirmText, setConfirmText] = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   const query = useQuery({
     queryKey: queryKeys.resource(kind.slug, namespace, name),
@@ -45,8 +47,33 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
     },
   })
 
+  const confirmRestore = useMutation({
+    mutationFn: async () => {
+      const current = query.data
+      if (!current) {
+        throw new Error('resource is not loaded')
+      }
+      return api.updateResource(kind.slug, namespace, name, {
+        ...toSubmitBody(current),
+        spec: { ...toSubmitBody(current).spec, confirm: 'RESTORE' },
+      })
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.resource(kind.slug, namespace, name),
+      })
+      message.success('Restore confirmed. The operator will import the stored export.')
+      setConfirmOpen(false)
+      setConfirmText('')
+    },
+    onError: (error) => {
+      message.error(errorMessage(error))
+    },
+  })
+
   const resource = query.data
   const owned = Boolean(resource && isManaged(resource))
+  const readOnly = Boolean(resource && isReadOnly(resource))
   const yaml = resource
     ? toYAML({
         apiVersion: resource.apiVersion,
@@ -88,9 +115,14 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
           </Space>
         </div>
         <Space>
-          <Button icon={<EditOutlined />} disabled={!resource || owned} onClick={() => setEditing(true)}>
+          <Button icon={<EditOutlined />} disabled={!resource || readOnly} onClick={() => setEditing(true)}>
             Edit
           </Button>
+          {kind.apiKind === 'MikroTikRestore' && resource && resource.spec?.confirm !== 'RESTORE' && !resource.status?.applied ? (
+            <Button danger icon={<WarningOutlined />} onClick={() => setConfirmOpen(true)}>
+              Confirm restore
+            </Button>
+          ) : null}
           <Button danger icon={<DeleteOutlined />} disabled={!resource || owned} onClick={confirmDelete}>
             Delete
           </Button>
@@ -123,6 +155,9 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
                         { label: 'Router', children: resource.status?.routerRef || '—' },
                         { label: 'Target address', children: resource.status?.targetAddress || '—' },
                         { label: 'External address', children: resource.status?.externalAddress || '—' },
+                        { label: 'Export bytes', children: formatValue(resource.status?.exportBytes) },
+                        { label: 'Captured at', children: formatValue(resource.status?.capturedAt) },
+                        { label: 'Target', children: formatValue(resource.status?.target) },
                       ].filter((item) => item.children !== '—')}
                     />
                   </Card>
@@ -147,6 +182,30 @@ export function ResourceDetail({ kind }: { kind: KindConfig }) {
         resource={resource}
         onClose={() => setEditing(false)}
       />
+      <Modal
+        title="Confirm restore"
+        open={confirmOpen}
+        okText="Confirm restore"
+        okButtonProps={{ danger: true, disabled: confirmText !== 'RESTORE', loading: confirmRestore.isPending }}
+        onCancel={() => {
+          setConfirmOpen(false)
+          setConfirmText('')
+        }}
+        onOk={() => confirmRestore.mutateAsync()}
+      >
+        <Typography.Paragraph>
+          This runs <code>/import</code> of the stored export. It does not reset or wipe the
+          device. Use it on an empty or unconfigured router; existing objects may fail with{' '}
+          <code>already have such</code>. Unmanaged RouterOS objects in the export are included.
+          Type <Typography.Text code>RESTORE</Typography.Text> to continue.
+        </Typography.Paragraph>
+        <Input
+          value={confirmText}
+          onChange={(event) => setConfirmText(event.target.value)}
+          placeholder="RESTORE"
+          autoComplete="off"
+        />
+      </Modal>
     </>
   )
 }

@@ -7,23 +7,6 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-09-01
-
-### Fixed
-
-- Admin UI resource updates keep the managed-config finalizer (and other
-  operator metadata) so a save followed by delete still cleans up RouterOS
-  DNS, NAT, route, and firewall entries.
-- Resolve `namespace/name` router refs to the namespaced `MikroTikRouter`
-  object instead of treating the whole string as a resource name.
-
-### Changed
-
-- Default operator and admin UI image tag is `v0.4.0` (`Chart.yaml`
-  `appVersion`). Chart package version is `0.4.0`.
-
-## [0.3.0] - 2026-09-01
-
 ### Added
 
 - Optional `spec.destinationAddress` on `MikroTikPortForward` sets RouterOS
@@ -32,18 +15,17 @@ and the project follows semantic versioning.
   the source for generated port-forward children.
 - Admin UI service and pod refs use searchable namespace-then-name
   dropdowns, backed by name-only list APIs.
+- `MikroTikBackup` and `MikroTikRestore` custom resources for text RouterOS
+  `/export` snapshots (manual or cron with retention) and confirmed `/import`.
+  Remote FTP/SMB/S3 storage is reserved and rejected until implemented.
+  Chart package version is `0.3.0` (operator `appVersion` remains `v0.2.0`
+  until the next image release). The admin UI lists backups without
+  `status.export` and requires typing `RESTORE` before `/import`.
 
 ### Fixed
 
 - Admin UI shell fills the viewport height, and owned-resource labels
   ellipsize instead of overlapping row actions.
-
-### Changed
-
-- Default operator and admin UI image tag is `v0.3.0` (`Chart.yaml`
-  `appVersion`). Chart package version is `0.3.0`.
-- Public docs use a dark VitePress-styled GitHub Pages theme, with refreshed
-  Admin UI screenshots.
 
 ## [0.2.0] - 2026-08-31
 
@@ -84,7 +66,10 @@ and the project follows semantic versioning.
 - Improved repository guidance and AI-assisted contribution workflows.
 - Added grouped Dependabot updates for Go, GitHub Actions, and container images.
 
-## [0.3.0] - 2026-08-29
+## [0.3.0-pre] - 2026-08-29
+
+Historical pre-release notes from before the chart reached 0.3.0. The published
+chart version `0.3.0` is the Unreleased backup/restore package above.
 
 ### Added
 

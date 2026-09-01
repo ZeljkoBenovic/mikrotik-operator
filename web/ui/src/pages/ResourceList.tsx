@@ -12,7 +12,7 @@ import type { KindConfig } from '../kinds'
 import type { OutletContext } from '../layout/AppLayout'
 import { errorMessage } from '../utils/errors'
 import { liveListRefetchInterval } from '../utils/liveQuery'
-import { displayNamespace, isManaged, specSummary } from '../utils/resource'
+import { displayNamespace, isManaged, isReadOnly, specSummary } from '../utils/resource'
 
 export function ResourceList({ kind }: { kind: KindConfig }) {
   const { message, modal } = App.useApp()
@@ -153,14 +153,25 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
             width: 108,
             render: (_, row) => {
               const owned = isManaged(row)
+              const readOnly = isReadOnly(row)
               return (
                 <Space>
                   <Button
                     size="small"
                     icon={<EditOutlined />}
-                    disabled={owned}
-                    title={owned ? 'Managed resources are read-only' : 'Edit'}
-                    onClick={() => setDrawer({ mode: 'edit', resource: row })}
+                    disabled={readOnly}
+                    title={
+                      owned
+                        ? 'Managed resources are read-only'
+                        : readOnly
+                          ? 'Applied restores are read-only'
+                          : 'Edit'
+                    }
+                    onClick={() => {
+                      if (!readOnly) {
+                        setDrawer({ mode: 'edit', resource: row })
+                      }
+                    }}
                   />
                   <Button
                     size="small"

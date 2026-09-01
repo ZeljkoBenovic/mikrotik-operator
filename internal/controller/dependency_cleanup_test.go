@@ -385,21 +385,21 @@ func externalCleanupFixture(t *testing.T) (*runtime.Scheme, []client.Object, ros
 }
 
 type recordingRouterClient struct {
-	ensuredDNS              int
-	ensuredRoutes           int
-	ensuredForwards         int
-	ensuredFirewall         int
-	deletedDNS              int
-	deletedRoutes           int
-	deletedForwards         int
-	deletedFirewall         int
-	deletedManaged          int
-	ensuredRouteGateways    []string
-	deletedRouteComments    []string
-	ensuredPortForwards     []ros.PortForward
-	ensuredFirewallRules    []ros.FirewallRule
-	ensuredFirewallComments []string
-	deletedFirewallComments []string
+	ensuredDNS           int
+	ensuredRoutes        int
+	ensuredForwards      int
+	ensuredFirewall      int
+	deletedDNS           int
+	deletedRoutes        int
+	deletedForwards      int
+	deletedFirewall      int
+	ensuredRouteGateways []string
+	deletedRouteComments []string
+	ensuredPortForwards  []ros.PortForward
+	exportText           string
+	imported             []string
+	exportErr            error
+	importErr            error
 }
 
 func (client *recordingRouterClient) EnsureDNS(context.Context, string, string, string, string) error {
@@ -438,19 +438,28 @@ func (client *recordingRouterClient) DeleteRoutesByPrefix(context.Context, strin
 	return nil
 }
 
-func (client *recordingRouterClient) EnsureFirewallRule(_ context.Context, rule ros.FirewallRule, comment string) error {
+func (client *recordingRouterClient) EnsureFirewallRule(context.Context, ros.FirewallRule, string) error {
 	client.ensuredFirewall++
-	client.ensuredFirewallRules = append(client.ensuredFirewallRules, rule)
-	client.ensuredFirewallComments = append(client.ensuredFirewallComments, comment)
 	return nil
 }
-func (client *recordingRouterClient) DeleteFirewallRule(_ context.Context, comment string) error {
+func (client *recordingRouterClient) DeleteFirewallRule(context.Context, string) error {
 	client.deletedFirewall++
-	client.deletedFirewallComments = append(client.deletedFirewallComments, comment)
 	return nil
 }
-func (client *recordingRouterClient) DeleteManagedConfiguration(context.Context) error {
-	client.deletedManaged++
+func (client *recordingRouterClient) Export(context.Context) (string, error) {
+	if client.exportErr != nil {
+		return "", client.exportErr
+	}
+	if client.exportText == "" {
+		return "/ip dns set servers=1.1.1.1\n", nil
+	}
+	return client.exportText, nil
+}
+func (client *recordingRouterClient) Import(_ context.Context, script string) error {
+	if client.importErr != nil {
+		return client.importErr
+	}
+	client.imported = append(client.imported, script)
 	return nil
 }
 func (*recordingRouterClient) Close() error { return nil }

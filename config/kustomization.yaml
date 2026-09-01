@@ -7,6 +7,8 @@ resources:
 - crd/bases/mikrotik.operator.io_mikrotikfirewallrules.yaml
 - crd/bases/mikrotik.operator.io_mikrotikdnsrecords.yaml
 - crd/bases/mikrotik.operator.io_mikrotikportforwards.yaml
+- crd/bases/mikrotik.operator.io_mikrotikbackups.yaml
+- crd/bases/mikrotik.operator.io_mikrotikrestores.yaml
 - rbac/role.yaml
 - manager/deployment.yaml
 - manager/pdb.yaml
