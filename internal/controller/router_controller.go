@@ -555,16 +555,14 @@ func resolveRouterReference(ctx context.Context, kube client.Client, namespace, 
 	hintNamespace, name := splitRouterReference(reference)
 	if name != "" && hintNamespace != "" {
 		key := types.NamespacedName{Namespace: hintNamespace, Name: name}
-		var router api.MikroTikRouter
-		if err := kube.Get(ctx, key, &router); err != nil {
+		if _, err := getMikroTikRouter(ctx, kube, key); err != nil {
 			return types.NamespacedName{}, err
 		}
 		return key, nil
 	}
 	if name != "" {
 		local := types.NamespacedName{Namespace: namespace, Name: name}
-		var router api.MikroTikRouter
-		err := kube.Get(ctx, local, &router)
+		_, err := getMikroTikRouter(ctx, kube, local)
 		if err == nil {
 			return local, nil
 		}

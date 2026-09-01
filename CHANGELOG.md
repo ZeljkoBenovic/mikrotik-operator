@@ -9,19 +9,46 @@ and the project follows semantic versioning.
 
 ### Added
 
+- `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
+  Operator `appVersion` remains `v0.4.0`.
+
+## [0.4.0] - 2026-09-01
+
+### Fixed
+
+- Admin UI resource updates keep the managed-config finalizer (and other
+  operator metadata) so a save followed by delete still cleans up RouterOS
+  DNS, NAT, route, and firewall entries.
+- Resolve `namespace/name` router refs to the namespaced `MikroTikRouter`
+  object instead of treating the whole string as a resource name.
+
+### Changed
+
+- Default operator and admin UI image tag is `v0.4.0` (`Chart.yaml`
+  `appVersion`). Chart package version is `0.4.0`.
+
+## [0.3.0] - 2026-09-01
+
+### Added
+
 - Optional `spec.destinationAddress` on `MikroTikPortForward` sets RouterOS
   `dst-address` on the dst-nat rule so the match applies only to traffic
   received on that IP. The `public-ip` annotation remains the fallback and
   the source for generated port-forward children.
 - Admin UI service and pod refs use searchable namespace-then-name
   dropdowns, backed by name-only list APIs.
-- `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.3.0`.
-  Operator `appVersion` remains `v0.2.0`.
 
 ### Fixed
 
 - Admin UI shell fills the viewport height, and owned-resource labels
   ellipsize instead of overlapping row actions.
+
+### Changed
+
+- Default operator and admin UI image tag is `v0.3.0` (`Chart.yaml`
+  `appVersion`). Chart package version is `0.3.0`.
+- Public docs use a dark VitePress-styled GitHub Pages theme, with refreshed
+  Admin UI screenshots.
 
 ## [0.2.0] - 2026-08-31
 

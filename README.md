@@ -86,7 +86,7 @@ The chart installs the operator, RBAC, CRDs, probes, and the `mikrotik`
 helm upgrade --install mikrotik-operator ./charts/mikrotik-operator \
   --namespace mikrotik-operator-system \
   --create-namespace \
-  --set image.tag=v0.2.0
+  --set image.tag=v0.4.0
 ```
 
 The raw Kubernetes resources are also available under [`config/`](config/).
@@ -113,19 +113,21 @@ kubectl -n mikrotik-operator-system port-forward \
 ```
 
 On a Linux host, `make test-install-ui` installs K3s and the chart with the
-UI enabled. See [`docs/admin-ui.md`](docs/admin-ui.md) for the full guide.
+UI enabled. See [`docs/_guide/admin-ui.md`](docs/_guide/admin-ui.md) for the
+full guide.
 
-![Admin UI dashboard with per-kind counts and not-ready resources](docs/images/ui-dashboard.png)
+![Admin UI dashboard with per-kind counts including Routes and a not-ready resources table](docs/images/ui-dashboard.png)
 
-The dashboard shows counts for each custom resource kind and highlights
-objects that are not Ready.
+The dashboard shows counts for routers, DNS records, routes, port forwards,
+and firewall rules, plus objects that are not Ready.
 
-![DNS record list with managed and standalone resources](docs/images/ui-dns-records.png)
+![DNS Records list with search, Create, a searchable namespace filter, and an ellipsized ownership badge](docs/images/ui-dns-records.png)
 
-List pages support namespace filtering, search, and create/edit/delete for
-standalone resources.
+List pages include name/spec search, a searchable namespace filter, and
+create/edit/delete for standalone resources. Ownership badges truncate with
+an ellipsis; hover to read the full `Managed · Service/namespace/name` text.
 
-![Owned DNS record shown as read-only and managed by a Service](docs/images/ui-owned-dns-record.png)
+![Owned DNS record shown as read-only with disabled Edit/Delete and a Managed by Service banner](docs/images/ui-owned-dns-record.png)
 
 Resources generated from a `Service`, `Ingress`, or `HTTPRoute` show a
 **Managed by** banner. Edit and delete are disabled; change the owning
@@ -195,8 +197,8 @@ make test-install-ui
 ```
 
 `make test-install UI_ENABLED=true` does the same. After install, port-forward
-the UI Service as described in [`docs/admin-ui.md`](docs/admin-ui.md). Override
-`IMAGE_TAG` to pin operator and UI images together.
+the UI Service as described in [`docs/_guide/admin-ui.md`](docs/_guide/admin-ui.md).
+Override `IMAGE_TAG` to pin operator and UI images together.
 
 On WSL2, Docker Desktop adds a `/Docker/host` mount whose options contain an
 unescaped space. Kubelet treats that as a fatal `/proc/mounts` parse error and
