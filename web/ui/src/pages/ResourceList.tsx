@@ -167,7 +167,11 @@ export function ResourceList({ kind }: { kind: KindConfig }) {
                           ? 'Applied restores are read-only'
                           : 'Edit'
                     }
-                    onClick={() => setDrawer({ mode: 'edit', resource: row })}
+                    onClick={() => {
+                      if (!readOnly) {
+                        setDrawer({ mode: 'edit', resource: row })
+                      }
+                    }}
                   />
                   <Button
                     size="small"

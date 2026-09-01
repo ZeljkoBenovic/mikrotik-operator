@@ -47,6 +47,8 @@ export function formFromResource(kind: KindConfig, resource: ResourceObject): Ed
     if (spec.targetType === 'connection') {
       spec.connection = { ...connection, tls: Boolean(connection.tls) }
     }
+    // Confirmation is an explicit action on the resource page, never an edit-form value.
+    delete spec.confirm
   }
   return {
     name: resource.metadata.name,
@@ -83,11 +85,7 @@ export function emptyForm(kind: KindConfig, namespace: string): EditorFormValues
   }
 }
 
-export function resourceFromForm(
-  kind: KindConfig,
-  values: EditorFormValues,
-  mode: 'create' | 'edit' = 'create',
-): ResourceObject {
+export function resourceFromForm(kind: KindConfig, values: EditorFormValues): ResourceObject {
   const spec = asRecord(values.spec)
   if (kind.apiKind === 'MikroTikRouter') {
     if (spec.endpointMode === 'multi') {
@@ -128,9 +126,8 @@ export function resourceFromForm(
   if (kind.apiKind === 'MikroTikRestore') {
     const targetType = spec.targetType
     delete spec.targetType
-    if (mode !== 'edit') {
-      delete spec.confirm
-    }
+    // Editing a restore must never retain confirmation from YAML or hidden form state.
+    delete spec.confirm
     if (targetType === 'connection') {
       delete spec.routerRef
     } else {

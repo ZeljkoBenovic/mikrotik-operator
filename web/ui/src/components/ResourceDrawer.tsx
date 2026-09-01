@@ -178,7 +178,7 @@ export function ResourceDrawer({
         sanitizeKubernetesName(String(form.getFieldValue('name') ?? ''), { finalize: true }),
       )
       const values = await form.validateFields()
-      const body = resourceFromForm(kind, values, mode)
+      const body = resourceFromForm(kind, values)
       if (createMode) {
         body.metadata.namespace = operatorNamespace
       }
@@ -200,7 +200,7 @@ export function ResourceDrawer({
     try {
       if (next) {
         const values = form.getFieldsValue(true)
-        const body = resourceFromForm(kind, values, mode)
+        const body = resourceFromForm(kind, values)
         if (mode === 'edit' && resource) {
           body.metadata.labels = resource.metadata.labels
           body.metadata.annotations = resource.metadata.annotations

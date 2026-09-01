@@ -130,8 +130,14 @@ describe('form conversion', () => {
     expect(body.spec.routerRef).toBe('edge')
   })
 
-  it('preserves restore confirm on edit', () => {
+  it('strips restore confirm on edit', () => {
     const restore = KINDS[6]
+    const form = formFromResource(restore, {
+      metadata: { name: 'bring-up', namespace: 'app' },
+      spec: { backupRef: { name: 'once' }, routerRef: 'edge', confirm: 'RESTORE' },
+    } as ResourceObject)
+    expect(form.spec.confirm).toBeUndefined()
+
     const body = resourceFromForm(
       restore,
       {
@@ -144,9 +150,8 @@ describe('form conversion', () => {
           confirm: 'RESTORE',
         },
       },
-      'edit',
     )
-    expect(body.spec.confirm).toBe('RESTORE')
+    expect(body.spec.confirm).toBeUndefined()
   })
 
   it('keeps omitted restore connection tls false when converting an existing resource', () => {
