@@ -13,7 +13,7 @@ where a MikroTik router is the network gateway.
 
 Read the [public documentation](https://zeljkobenovic.github.io/mikrotik-operator/)
 for installation, usage, reference, architecture, and
-[troubleshooting](docs/troubleshooting.md).
+[troubleshooting](docs/_guide/troubleshooting.md).
 
 It creates DNS records, routes, NAT port forwards, and firewall rules while
 only managing configuration entries that it owns. Existing RouterOS rules are
@@ -86,7 +86,7 @@ The chart installs the operator, RBAC, CRDs, probes, and the `mikrotik`
 helm upgrade --install mikrotik-operator ./charts/mikrotik-operator \
   --namespace mikrotik-operator-system \
   --create-namespace \
-  --set image.tag=v0.2.0
+  --set image.tag=v0.4.0
 ```
 
 The raw Kubernetes resources are also available under [`config/`](config/).
@@ -113,19 +113,21 @@ kubectl -n mikrotik-operator-system port-forward \
 ```
 
 On a Linux host, `just test-install-ui` installs K3s and the chart with the
-UI enabled. See [`docs/admin-ui.md`](docs/admin-ui.md) for the full guide.
+UI enabled. See [`docs/_guide/admin-ui.md`](docs/_guide/admin-ui.md) for the
+full guide.
 
-![Admin UI dashboard with per-kind counts and not-ready resources](docs/images/ui-dashboard.png)
+![Admin UI dashboard with per-kind counts including Routes and a not-ready resources table](docs/images/ui-dashboard.png)
 
-The dashboard shows counts for each custom resource kind and highlights
-objects that are not Ready.
+The dashboard shows counts for routers, DNS records, routes, port forwards,
+and firewall rules, plus objects that are not Ready.
 
-![DNS record list with managed and standalone resources](docs/images/ui-dns-records.png)
+![DNS Records list with search, Create, a searchable namespace filter, and an ellipsized ownership badge](docs/images/ui-dns-records.png)
 
-List pages support namespace filtering, search, and create/edit/delete for
-standalone resources.
+List pages include name/spec search, a searchable namespace filter, and
+create/edit/delete for standalone resources. Ownership badges truncate with
+an ellipsis; hover to read the full `Managed · Service/namespace/name` text.
 
-![Owned DNS record shown as read-only and managed by a Service](docs/images/ui-owned-dns-record.png)
+![Owned DNS record shown as read-only with disabled Edit/Delete and a Managed by Service banner](docs/images/ui-owned-dns-record.png)
 
 Resources generated from a `Service`, `Ingress`, or `HTTPRoute` show a
 **Managed by** banner. Edit and delete are disabled; change the owning
@@ -182,7 +184,7 @@ Gateway and `HTTPRoute`.
 ## Local k3s testing
 
 Install a single-node K3s server and the operator chart on a Linux host
-(requires [just](https://github.com/casey/just), root, Helm, and kubectl):
+(requires just, Helm, and kubectl):
 
 ```sh
 just test-install
@@ -195,8 +197,8 @@ just test-install-ui
 ```
 
 `just test-install true` does the same. After install, port-forward
-the UI Service as described in [`docs/admin-ui.md`](docs/admin-ui.md). Override
-`IMAGE_TAG` to pin operator and UI images together.
+the UI Service as described in [`docs/_guide/admin-ui.md`](docs/_guide/admin-ui.md).
+Override `IMAGE_TAG` to pin operator and UI images together.
 
 On WSL2, Docker Desktop adds a `/Docker/host` mount whose options contain an
 unescaped space. Kubelet treats that as a fatal `/proc/mounts` parse error and
@@ -207,7 +209,7 @@ it does not run kubelet on the WSL host.
 The full RouterOS-backed E2E test uses k3d, which runs K3s inside Docker, and
 the [`docker-routeros`](https://github.com/EvilFreelancer/docker-routeros)
 RouterOS QEMU image as a Docker container with its API published onto the k3d
-network. It requires [just](https://github.com/casey/just), Docker, k3d, kubectl, Helm, Go, and a Linux shell such as
+network. It requires Docker, k3d, kubectl, Helm, Go, and a Linux shell such as
 WSL:
 
 ```sh
@@ -223,9 +225,6 @@ default. Override `E2E_ROUTER_IMAGE`, `E2E_CLUSTER_NAME`, or
 `E2E_OPERATOR_IMAGE` when needed.
 
 ## Development
-
-Install [`just`](https://github.com/casey/just), then run `just` to list
-recipes. Common checks:
 
 ```sh
 just fmt-check
@@ -262,8 +261,8 @@ opening a pull request. Use the repository issue forms for bug reports and
 feature requests.
 
 The operator architecture is documented in
-[`docs/how-it-works.md`](docs/how-it-works.md). Operational failures and
-common pitfalls are in [`docs/troubleshooting.md`](docs/troubleshooting.md).
+[`docs/_reference/how-it-works.md`](docs/_reference/how-it-works.md). Operational failures and
+common pitfalls are in [`docs/_guide/troubleshooting.md`](docs/_guide/troubleshooting.md).
 
 Use a dedicated RouterOS account with only the API policies required by the
 deployment, and keep RouterOS reachable from the operator Pod over TCP 8728

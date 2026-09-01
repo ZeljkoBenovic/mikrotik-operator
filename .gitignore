@@ -9,3 +9,6 @@ dist/
 *.tar.gz
 .idea/
 .vscode/
+docs/_site/
+docs/.jekyll-cache/
+docs/.bundle/

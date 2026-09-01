@@ -358,6 +358,57 @@ func TestDNSReconcilerCreatesOwnedRouteCRsForStandaloneServiceRef(t *testing.T) 
 	}
 }
 
+func TestDNSReconcilerSkipsClusterRoutesWhenOwnedByService(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{Name: "primary", Address: "192.0.2.1", CredentialsSecret: corev1.LocalObjectReference{Name: "creds"}}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "app"}, Data: map[string][]byte{"username": []byte("admin"), "password": []byte("x")}}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app", UID: "svc-uid"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8"},
+	}
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "owned", Namespace: "app", UID: "dns-uid",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikDNSRecordSpec{
+			RouterRef: router.Name, Name: "backend.home.arpa", Address: "10.0.0.8",
+			ServiceRef: &api.NamespacedName{Namespace: "app", Name: "backend"},
+		},
+	}
+	if err := controllerutil.SetControllerReference(&service, &record, scheme); err != nil {
+		t.Fatal(err)
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&router, &secret, &service, &record, &node).
+		WithStatusSubresource(&router, &record).Build()
+	reconciler := DNSReconciler{
+		Client: kube,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			return routerClient, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if routerClient.ensuredDNS == 0 {
+		t.Fatal("DNS reconciler did not apply the DNS record")
+	}
+	if routes := ownedRoutes(t, kube, &record); len(routes) != 0 {
+		t.Fatalf("translator-owned DNS created %d cluster routes, want 0", len(routes))
+	}
+}
+
 func annotatedClusterIPFixture() (corev1.Service, api.MikroTikRouter, corev1.Node) {
 	service := corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{

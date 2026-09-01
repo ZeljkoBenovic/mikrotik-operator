@@ -6,29 +6,30 @@ set script-interpreter := ["bash", "-euo", "pipefail"]
 set default-list
 
 image_repository := env("IMAGE_REPOSITORY", "ghcr.io/zeljkobenovic/mikrotik-operator")
-image_tag := env("IMAGE_TAG", "v0.2.0")
+image_tag := env("IMAGE_TAG", "v0.4.0")
 k3s_version := env("K3S_VERSION", "v1.36.4+k3s1")
 k3s_channel := env("K3S_CHANNEL", "stable")
 k3s_url := env("K3S_URL", "https://get.k3s.io")
 k3s_kubeconfig_mode := env("K3S_KUBECONFIG_MODE", "640")
+k3s_kubeconfig_group := env("K3S_KUBECONFIG_GROUP", "")
 k3s_namespace := env("K3S_NAMESPACE", "mikrotik-operator-system")
 k3s_kubeconfig := env("K3S_KUBECONFIG", "/etc/rancher/k3s/k3s.yaml")
 helm_release := env("HELM_RELEASE", "mikrotik-operator")
 helm_chart := env("HELM_CHART", "./charts/mikrotik-operator")
+e2e_ui_image := env("E2E_UI_IMAGE", "mikrotik-operator-ui:e2e")
+e2e_router_image := env("E2E_ROUTER_IMAGE", "evilfreelancer/docker-routeros:7.21.5")
+e2e_operator_image := env("E2E_OPERATOR_IMAGE", "mikrotik-operator:e2e")
 
-# Run unit tests with race detection, matching CI.
+# Run unit tests with race detection, matching CI. Avoid Bash 4-only array
+# builtins so this also works with the Bash 3.2 shipped by macOS.
 [group('dev')]
-[script]
 test:
-    mapfile -t packages < <(go list ./... | grep -v /node_modules/ || true)
-    go test -race -shuffle=on "${packages[@]}"
+    go test -race -shuffle=on ./...
 
 # Vet the same Go packages CI checks.
 [group('dev')]
-[script]
 vet:
-    mapfile -t packages < <(go list ./... | grep -v /node_modules/ || true)
-    go vet "${packages[@]}"
+    go vet ./...
 
 # Format Go sources in the paths CI checks.
 [group('dev')]
@@ -74,8 +75,9 @@ deploy:
 [group('cluster')]
 [script]
 k3s-install:
-    group="${K3S_KUBECONFIG_GROUP:-$(id -gn)}"
-    curl -sfL "{{ k3s_url }}" | INSTALL_K3S_CHANNEL="{{ k3s_channel }}" INSTALL_K3S_VERSION="{{ k3s_version }}" INSTALL_K3S_EXEC="server --write-kubeconfig-mode={{ k3s_kubeconfig_mode }} --write-kubeconfig-group=${group}" sh -
+    group="{{ k3s_kubeconfig_group }}"
+    if [ -z "$group" ]; then group="$(id -gn)"; fi
+    curl -sfL "{{ k3s_url }}" | INSTALL_K3S_CHANNEL="{{ k3s_channel }}" INSTALL_K3S_VERSION="{{ k3s_version }}" INSTALL_K3S_EXEC="server --write-kubeconfig-mode={{ k3s_kubeconfig_mode }} --write-kubeconfig-group=$group" sh -
     bash hack/k3s-wsl-docker-desktop.sh
 
 # Uninstall K3s and the WSL Docker Desktop kubelet workaround.
@@ -105,7 +107,7 @@ install-operator ui="false":
         kubectl --namespace "{{ k3s_namespace }}" rollout status deployment -l app.kubernetes.io/component=ui --timeout=180s
     fi
 
-# Install K3s, wait for the API, then install the chart. Pass `true` to enable the UI.
+# Install K3s, wait for the API, then install the chart. Pass true to enable the UI.
 [group('cluster')]
 [script]
 test-install ui="false": k3s-install
@@ -116,12 +118,12 @@ test-install ui="false": k3s-install
 [group('cluster')]
 test-install-ui: (test-install "true")
 
-# RouterOS-backed E2E on k3d. Override E2E_ROUTER_IMAGE or E2E_OPERATOR_IMAGE as needed.
+# RouterOS-backed E2E on k3d. Override the image variables as needed.
 [group('e2e')]
 e2e-test:
-    bash hack/e2e/run.sh
+    E2E_ROUTER_IMAGE="{{ e2e_router_image }}" E2E_OPERATOR_IMAGE="{{ e2e_operator_image }}" bash hack/e2e/run.sh
 
 # Admin UI HTTP CRUD E2E on k3d. Does not start RouterOS.
 [group('e2e')]
 e2e-ui-test:
-    bash hack/e2e-ui/run.sh
+    E2E_UI_IMAGE="{{ e2e_ui_image }}" bash hack/e2e-ui/run.sh

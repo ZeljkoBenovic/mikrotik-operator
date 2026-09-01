@@ -58,6 +58,37 @@ describe('form conversion', () => {
     expect(service.spec.podRef).toBeUndefined()
     expect(service.spec.serviceRef).toEqual({ namespace: 'app', name: 'web' })
 
+    const withDestination = resourceFromForm(forwards, {
+      name: 'web',
+      namespace: 'app',
+      spec: {
+        targetType: 'address',
+        targetAddress: '10.0.0.8',
+        destinationAddress: '203.0.113.10',
+        protocol: 'tcp',
+        routerRef: 'edge',
+        externalPort: 443,
+        targetPort: 8443,
+      },
+    })
+    expect(withDestination.spec.destinationAddress).toBe('203.0.113.10')
+    expect(withDestination.spec.targetAddress).toBe('10.0.0.8')
+
+    const withoutDestination = resourceFromForm(forwards, {
+      name: 'web',
+      namespace: 'app',
+      spec: {
+        targetType: 'address',
+        targetAddress: '10.0.0.8',
+        destinationAddress: '',
+        protocol: 'tcp',
+        routerRef: 'edge',
+        externalPort: 80,
+        targetPort: 80,
+      },
+    })
+    expect(withoutDestination.spec.destinationAddress).toBeUndefined()
+
     const fromResource = formFromResource(forwards, {
       metadata: { name: 'web', namespace: 'app' },
       spec: { podRef: { namespace: 'app', name: 'web-0' }, protocol: 'tcp' },

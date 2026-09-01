@@ -82,13 +82,14 @@ type MikroTikDNSRecordList struct {
 
 // +kubebuilder:validation:XValidation:rule="(has(self.targetAddress) && !has(self.podRef)) || (!has(self.targetAddress) && has(self.serviceRef) && !has(self.podRef)) || (!has(self.targetAddress) && !has(self.serviceRef) && has(self.podRef))",message="spec must target an address, Service, or Pod; targetAddress may be combined only with serviceRef for dependency tracking"
 type MikroTikPortForwardSpec struct {
-	RouterRef     string          `json:"routerRef"`
-	Protocol      string          `json:"protocol"`
-	ExternalPort  int32           `json:"externalPort"`
-	ServiceRef    *NamespacedName `json:"serviceRef,omitempty"`
-	PodRef        *NamespacedName `json:"podRef,omitempty"`
-	TargetPort    int32           `json:"targetPort"`
-	TargetAddress string          `json:"targetAddress,omitempty"`
+	RouterRef          string          `json:"routerRef"`
+	Protocol           string          `json:"protocol"`
+	ExternalPort       int32           `json:"externalPort"`
+	ServiceRef         *NamespacedName `json:"serviceRef,omitempty"`
+	PodRef             *NamespacedName `json:"podRef,omitempty"`
+	TargetPort         int32           `json:"targetPort"`
+	TargetAddress      string          `json:"targetAddress,omitempty"`
+	DestinationAddress string          `json:"destinationAddress,omitempty"`
 }
 type NamespacedName struct {
 	Namespace string `json:"namespace"`

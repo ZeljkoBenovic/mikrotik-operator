@@ -1,6 +1,9 @@
 ---
 layout: default
 title: Install and configure
+nav_order: 1
+redirect_from:
+  - /getting-started.html
 ---
 
 # Install and configure
@@ -24,8 +27,8 @@ The repository includes a disposable RouterOS-backed test environment. It uses
 k3d (K3s in Docker) and the
 [`docker-routeros`](https://github.com/EvilFreelancer/docker-routeros) QEMU
 image running as a Docker container with its API published onto the k3d
-network. Install [just](https://github.com/casey/just), Docker, k3d, kubectl,
-Helm, Go, and a Linux shell such as WSL, then run:
+network. Install just, Docker, k3d, kubectl, Helm, Go, and a Linux shell such as WSL,
+then run:
 
 ```sh
 just e2e-test
@@ -58,7 +61,7 @@ reference that router; they do not need a copy of the Secret.
 ```sh
 helm upgrade --install mikrotik-operator \
   oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator \
-  --version 0.2.0 \
+  --version 0.4.0 \
   --namespace mikrotik-operator-system \
   --create-namespace
 ```
@@ -113,7 +116,7 @@ kubectl -n mikrotik-system get mikrotikrouters
 ```
 
 Check the resource `Ready` condition and operator logs if the router is not
-connected. See [Troubleshooting](troubleshooting.md) for TLS, Secret
+connected. See [Troubleshooting]({% link _guide/troubleshooting.md %}) for TLS, Secret
 namespace, and ambiguous-router failures.
 
 ```sh
@@ -137,28 +140,28 @@ Or upgrade an existing chart install:
 ```sh
 helm upgrade --install mikrotik-operator \
   oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator \
-  --version 0.2.0 \
+  --version 0.4.0 \
   --namespace mikrotik-operator-system \
   --create-namespace \
   --set ui.enabled=true
 ```
 
-See [Admin UI](admin-ui.md) for port-forward instructions and the read-only
+See [Admin UI]({% link _guide/admin-ui.md %}) for port-forward instructions and the read-only
 rule for resources generated from a Service, Ingress, or HTTPRoute.
 
 ## Chart and image versions
 
 Helm chart package versions and operator image tags are independent. Chart
-`0.2.0` sets `appVersion` to `v0.2.0`, which is the image tag when
+`0.4.0` sets `appVersion` to `v0.4.0`, which is the image tag when
 `image.tag` is empty. Pin both when they must not drift:
 
 ```sh
 helm upgrade --install mikrotik-operator \
   oci://ghcr.io/zeljkobenovic/charts/mikrotik-operator \
-  --version 0.2.0 \
+  --version 0.4.0 \
   --namespace mikrotik-operator-system \
   --create-namespace \
-  --set image.tag=v0.2.0
+  --set image.tag=v0.4.0
 ```
 
 Images are published from trusted `vMAJOR.MINOR.PATCH` git tags. Chart

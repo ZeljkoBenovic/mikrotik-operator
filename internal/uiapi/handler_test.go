@@ -435,6 +435,73 @@ func TestNamespacesList(t *testing.T) {
 	}
 }
 
+func TestServiceAndPodListsReturnNamesOnly(t *testing.T) {
+	t.Parallel()
+	deleted := metav1.Now()
+	h := newTestHandler(t,
+		&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+			Spec:       corev1.ServiceSpec{ClusterIP: "10.43.0.10"},
+		},
+		&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "other"},
+			Spec:       corev1.ServiceSpec{ClusterIP: "10.43.0.11"},
+		},
+		&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "gone",
+				Namespace:         "app",
+				DeletionTimestamp: &deleted,
+				Finalizers:        []string{"mikrotik.operator.io/test"},
+			},
+			Spec: corev1.ServiceSpec{ClusterIP: "10.43.0.12"},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "web-0", Namespace: "app"},
+			Status:     corev1.PodStatus{PodIP: "10.42.0.8"},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "other-0", Namespace: "other"},
+			Status:     corev1.PodStatus{PodIP: "10.42.0.9"},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "terminating",
+				Namespace:         "app",
+				DeletionTimestamp: &deleted,
+				Finalizers:        []string{"mikrotik.operator.io/test"},
+			},
+			Status: corev1.PodStatus{PodIP: "10.42.0.10"},
+		},
+	)
+
+	services := doRequest(t, h, http.MethodGet, "/api/services/app", "")
+	if services.Code != http.StatusOK {
+		t.Fatalf("services status %d body %s", services.Code, services.Body.String())
+	}
+	if got := listNameItems(t, services); len(got) != 1 || got[0] != "web" {
+		t.Fatalf("services %#v", got)
+	}
+	for _, leak := range []string{"10.43.0.10", "10.43.0.11", "10.43.0.12", `"spec"`, `"status"`, `"clusterIP"`} {
+		if strings.Contains(services.Body.String(), leak) {
+			t.Fatalf("service payload leaked %q in %s", leak, services.Body.String())
+		}
+	}
+
+	pods := doRequest(t, h, http.MethodGet, "/api/pods/app", "")
+	if pods.Code != http.StatusOK {
+		t.Fatalf("pods status %d body %s", pods.Code, pods.Body.String())
+	}
+	if got := listNameItems(t, pods); len(got) != 1 || got[0] != "web-0" {
+		t.Fatalf("pods %#v", got)
+	}
+	for _, leak := range []string{"10.42.0.8", "10.42.0.9", "10.42.0.10", `"spec"`, `"status"`, `"podIP"`} {
+		if strings.Contains(pods.Body.String(), leak) {
+			t.Fatalf("pod payload leaked %q in %s", leak, pods.Body.String())
+		}
+	}
+}
+
 func TestConfigReturnsOperatorNamespace(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(t)

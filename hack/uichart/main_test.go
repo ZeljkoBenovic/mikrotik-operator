@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
       - name: ui
-        image: ghcr.io/zeljkobenovic/mikrotik-operator-ui:v0.2.0
+        image: ghcr.io/zeljkobenovic/mikrotik-operator-ui:v0.4.0
         args:
         - "-bind-address=:8080"
         - "-static-dir=/ui"
@@ -92,6 +92,12 @@ rules:
   verbs: [list]
 - apiGroups: [""]
   resources: [namespaces]
+  verbs: [list]
+- apiGroups: [""]
+  resources: [services]
+  verbs: [list]
+- apiGroups: [""]
+  resources: [pods]
   verbs: [list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -181,13 +187,13 @@ func TestValidateClusterRoleRejectsStatusAndPods(t *testing.T) {
 		t.Fatalf("error %v", err)
 	}
 
-	withPods := strings.Replace(enabledManifest, "resources: [namespaces]\n  verbs: [list]", "resources: [namespaces, pods]\n  verbs: [list]", 1)
-	docs, err = decodeDocs([]byte(withPods))
+	withPodsGet := strings.Replace(enabledManifest, "resources: [pods]\n  verbs: [list]", "resources: [pods]\n  verbs: [get, list]", 1)
+	docs, err = decodeDocs([]byte(withPodsGet))
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = validateRendered(docs, true, true)
-	if err == nil || !strings.Contains(err.Error(), "pods") {
+	if err == nil || !strings.Contains(err.Error(), "pods verbs") {
 		t.Fatalf("error %v", err)
 	}
 }

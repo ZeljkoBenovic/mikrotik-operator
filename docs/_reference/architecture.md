@@ -1,6 +1,9 @@
 ---
 layout: default
 title: Architecture
+nav_order: 2
+redirect_from:
+  - /architecture.html
 ---
 
 # Architecture
@@ -86,5 +89,5 @@ TLS API connections (`spec.tls: true`) verify certificates with the Go
 defaults. The optional admin UI has no authentication; keep it ClusterIP-only
 or behind an authenticating proxy.
 
-See [How the operator works](how-it-works.md) for controller names and the
+See [How the operator works]({% link _reference/how-it-works.md %}) for controller names and the
 contributor checklist when adding a managed capability.

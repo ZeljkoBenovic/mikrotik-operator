@@ -28,8 +28,8 @@ kubectl kustomize config
 ```
 
 `just test` already runs with `-race` and `-shuffle=on`. RouterOS integration
-tests must remain separate from the default unit-test path and must not
-require credentials committed to the repository.
+tests must remain separate from the default unit-test path and must not require
+credentials committed to the repository.
 
 ## Go and controller conventions
 
@@ -81,14 +81,14 @@ require credentials committed to the repository.
 | Change | Update and validate |
 | --- | --- |
 | API type or status change | `api/v1alpha1/*.go`, deepcopy code, `config/crd/bases`, chart CRDs, examples, tests |
-| New or changed controller | `internal/controller`, RBAC, watches, status behavior, unit tests, `docs/how-it-works.md`, `docs/architecture.md` |
+| New or changed controller | `internal/controller`, RBAC, watches, status behavior, unit tests, `docs/_reference/how-it-works.md`, `docs/_reference/architecture.md` |
 | RouterOS command or managed comment | `internal/routeros`, RouterOS tests, controller cleanup paths, RouterOS compatibility notes |
 | New CLI flag | `cmd/manager/main.go`, Helm deployment template, raw deployment, values/documentation |
 | Helm value or template | `charts/mikrotik-operator`, README, rendered-resource validation, chart version in `Chart.yaml` |
 | Kubernetes watch or permission | controller setup, `config/rbac/role.yaml`, Helm RBAC templates, tests |
-| Release/image behavior | `.goreleaser.yaml`, `Dockerfile`, `Dockerfile.release`, `Dockerfile.ui`, `Dockerfile.ui.release`, `justfile`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, README, `docs/getting-started.md` |
-| Helm chart publishing | `charts/mikrotik-operator/Chart.yaml`, `.github/workflows/release-chart.yml`, README, `docs/getting-started.md` |
-| Operator behavior users hit | `docs/`, especially `docs/troubleshooting.md` and `docs/reference.md` |
+| Release/image behavior | `.goreleaser.yaml`, `Dockerfile`, `Dockerfile.release`, `Dockerfile.ui`, `Dockerfile.ui.release`, `justfile`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, README, `docs/_guide/getting-started.md` |
+| Helm chart publishing | `charts/mikrotik-operator/Chart.yaml`, `.github/workflows/release-chart.yml`, README, `docs/_guide/getting-started.md` |
+| Operator behavior users hit | `docs/`, especially `docs/_guide/troubleshooting.md` and `docs/_reference/reference.md` |
 | Dependency update behavior | `go.mod`, `go.sum`, `Dockerfile`, `.github/workflows`, `.github/dependabot.yml`, CI validation |
 | Contributor workflow | `AGENTS.md`, `CLAUDE.md`, this file, README, `.github/PULL_REQUEST_TEMPLATE.md` |
 

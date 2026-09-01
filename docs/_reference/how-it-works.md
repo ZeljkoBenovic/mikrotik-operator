@@ -1,6 +1,9 @@
 ---
 layout: default
 title: How the operator works
+nav_order: 3
+redirect_from:
+  - /how-it-works.html
 ---
 
 # How the operator works

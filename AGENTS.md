@@ -3,7 +3,7 @@
 This repository contains a standalone Go Kubernetes operator for MikroTik RouterOS v6 and v7. Keep changes production-oriented, small, testable, and compatible with local Kubernetes distributions such as k3s.
 
 Project architecture and contributor onboarding are documented in
-`docs/how-it-works.md`, while GitHub Copilot-specific conventions and the
+`docs/_reference/how-it-works.md`, while GitHub Copilot-specific conventions and the
 maintenance matrix live in `.github/copilot-instructions.md`. Keep those files
 aligned when changing the controller, API, packaging, or contributor workflow.
 

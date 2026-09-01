@@ -324,6 +324,49 @@ func TestPersistServiceRouteRouterTargetKeepsMissingChildHistory(t *testing.T) {
 	}
 }
 
+func TestCompactDurableRouterTargetReplacesAndClearsAnnotation(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	object := &api.MikroTikFirewallRule{ObjectMeta: metav1.ObjectMeta{
+		Name:        "object",
+		Namespace:   "app",
+		Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a,router-b"},
+	}}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(object).Build()
+
+	updated, err := compactDurableRouterTarget(context.Background(), kube, object, "router-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated {
+		t.Fatal("compact to a single target did not persist")
+	}
+	if object.GetAnnotations()[durableRouterTargetsAnnotation] != "router-b" {
+		t.Fatalf("annotation = %q, want router-b", object.GetAnnotations()[durableRouterTargetsAnnotation])
+	}
+
+	updated, err = compactDurableRouterTarget(context.Background(), kube, object, "router-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated {
+		t.Fatal("identical target was written again")
+	}
+
+	updated, err = compactDurableRouterTarget(context.Background(), kube, object, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated {
+		t.Fatal("clearing durable targets did not persist")
+	}
+	if _, exists := object.GetAnnotations()[durableRouterTargetsAnnotation]; exists {
+		t.Fatalf("annotation still present: %q", object.GetAnnotations()[durableRouterTargetsAnnotation])
+	}
+}
+
 func TestReadyConditionPreservesTransitionTime(t *testing.T) {
 	previous := metav1.NewTime(metav1.Now().Add(-60 * 1000000000))
 	existing := []metav1.Condition{{
@@ -344,5 +387,34 @@ func TestReadyConditionChangesTransitionTimeWhenStateChanges(t *testing.T) {
 	condition := readyCondition(existing, metav1.ConditionTrue, "Applied", "new")
 	if condition[0].LastTransitionTime.IsZero() || condition[0].Status != metav1.ConditionTrue {
 		t.Fatalf("condition was not updated: %#v", condition[0])
+	}
+}
+
+func TestPortForwardDestinationAddress(t *testing.T) {
+	tests := []struct {
+		name  string
+		spec  string
+		annot string
+		want  string
+	}{
+		{name: "spec only", spec: "203.0.113.10", want: "203.0.113.10"},
+		{name: "annotation fallback", annot: "198.51.100.10", want: "198.51.100.10"},
+		{name: "spec preferred over annotation", spec: "203.0.113.10", annot: "198.51.100.10", want: "203.0.113.10"},
+		{name: "empty", want: ""},
+		{name: "spec whitespace ignored", spec: "  203.0.113.10  ", want: "203.0.113.10"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			forward := api.MikroTikPortForward{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}},
+				Spec:       api.MikroTikPortForwardSpec{DestinationAddress: test.spec},
+			}
+			if test.annot != "" {
+				forward.Annotations[api.PublicIPAnnotation] = test.annot
+			}
+			if got := portForwardDestinationAddress(forward); got != test.want {
+				t.Fatalf("portForwardDestinationAddress() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
