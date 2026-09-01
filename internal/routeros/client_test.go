@@ -702,3 +702,172 @@ func TestFirewallRuleMatches(t *testing.T) {
 		t.Fatal("firewallRuleMatches() returned true for a different rule")
 	}
 }
+
+func TestEnsureDNS_AddsWhenMissingAndSkipsWhenMatching(t *testing.T) {
+	comment := ManagedComment("dns", "web", "apps")
+	empty := &routeros.Reply{}
+	matching := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{
+			"name":    "web.example.com",
+			"address": "10.0.0.8",
+			"ttl":     "1h",
+			"comment": comment,
+		},
+	}}}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty},
+			{reply: empty},
+			{reply: &routeros.Reply{}},
+			{reply: matching},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	if err := api.EnsureDNS(context.Background(), "web.example.com", "10.0.0.8", "1h", comment); err != nil {
+		t.Fatalf("EnsureDNS() create error = %v", err)
+	}
+	if len(client.calls) != 3 {
+		t.Fatalf("create command count = %d, want 3", len(client.calls))
+	}
+	if got := client.calls[2]; len(got) == 0 || got[0] != "/ip/dns/static/add" {
+		t.Fatalf("create command = %v, want /ip/dns/static/add", client.calls[2])
+	}
+
+	if err := api.EnsureDNS(context.Background(), "web.example.com", "10.0.0.8", "1h", comment); err != nil {
+		t.Fatalf("EnsureDNS() skip error = %v", err)
+	}
+	if len(client.calls) != 4 {
+		t.Fatalf("skip command count = %d, want 4", len(client.calls))
+	}
+	if client.calls[3][0] != "/ip/dns/static/print" {
+		t.Fatalf("matching record issued %v", client.calls[3])
+	}
+}
+
+func TestEnsureFirewallRule_AddsOptionalMatchersAndSkipsWhenMatching(t *testing.T) {
+	comment := ManagedComment("firewall", "web", "apps")
+	empty := &routeros.Reply{}
+	rule := FirewallRule{
+		Chain:              "forward",
+		Action:             "accept",
+		Protocol:           "tcp",
+		SourceAddress:      "10.0.0.0/24",
+		DestinationAddress: "10.0.0.10",
+		DestinationPort:    "443",
+		ConnectionState:    []string{"new"},
+		LogPrefix:          "web",
+	}
+	matching := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{
+			".id":              "*1",
+			"chain":            rule.Chain,
+			"action":           rule.Action,
+			"protocol":         rule.Protocol,
+			"src-address":      rule.SourceAddress,
+			"dst-address":      rule.DestinationAddress,
+			"dst-port":         rule.DestinationPort,
+			"connection-state": "new",
+			"log-prefix":       rule.LogPrefix,
+			"comment":          comment,
+		},
+	}}}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty},
+			{reply: empty},
+			{reply: &routeros.Reply{}},
+			{reply: matching},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	if err := api.EnsureFirewallRule(context.Background(), rule, comment); err != nil {
+		t.Fatalf("EnsureFirewallRule() create error = %v", err)
+	}
+	if len(client.calls) != 3 {
+		t.Fatalf("create command count = %d, want 3", len(client.calls))
+	}
+	add := client.calls[2]
+	if len(add) == 0 || add[0] != "/ip/firewall/filter/add" {
+		t.Fatalf("create command = %v, want /ip/firewall/filter/add", add)
+	}
+	wantArgs := []string{
+		"=chain=forward",
+		"=action=accept",
+		"=protocol=tcp",
+		"=src-address=10.0.0.0/24",
+		"=dst-address=10.0.0.10",
+		"=dst-port=443",
+		"=connection-state=new",
+		"=log-prefix=web",
+	}
+	for _, arg := range wantArgs {
+		found := false
+		for _, got := range add {
+			if got == arg {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("add command %v missing %s", add, arg)
+		}
+	}
+
+	if err := api.EnsureFirewallRule(context.Background(), rule, comment); err != nil {
+		t.Fatalf("EnsureFirewallRule() skip error = %v", err)
+	}
+	if len(client.calls) != 4 {
+		t.Fatalf("skip command count = %d, want 4", len(client.calls))
+	}
+	if client.calls[3][0] != "/ip/firewall/filter/print" {
+		t.Fatalf("matching rule issued %v", client.calls[3])
+	}
+}
+
+func TestDeleteManagedConfiguration_RemovesOnlyManagedComments(t *testing.T) {
+	managed := ManagedComment("dns", "web", "apps")
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: &routeros.Reply{Re: []*proto.Sentence{
+				{Map: map[string]string{".id": "*1", "comment": managed}},
+				{Map: map[string]string{".id": "*2", "comment": "user-static"}},
+			}}},
+			{reply: &routeros.Reply{}},
+			{reply: emptyRouterOSReply()},
+			{reply: emptyRouterOSReply()},
+			{reply: emptyRouterOSReply()},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+	if err := api.DeleteManagedConfiguration(context.Background()); err != nil {
+		t.Fatalf("DeleteManagedConfiguration() error = %v", err)
+	}
+	removed := 0
+	for _, call := range client.calls {
+		if len(call) == 0 || !strings.HasSuffix(call[0], "/remove") {
+			continue
+		}
+		removed++
+		foundManaged := false
+		for _, arg := range call {
+			if arg == "=.id=*1" {
+				foundManaged = true
+			}
+			if arg == "=.id=*2" {
+				t.Fatalf("removed unmanaged entry: %v", call)
+			}
+		}
+		if !foundManaged {
+			t.Fatalf("remove command %v did not target managed id *1", call)
+		}
+	}
+	if removed != 1 {
+		t.Fatalf("remove commands = %d, want 1", removed)
+	}
+}
+
+func emptyRouterOSReply() *routeros.Reply {
+	return &routeros.Reply{}
+}
