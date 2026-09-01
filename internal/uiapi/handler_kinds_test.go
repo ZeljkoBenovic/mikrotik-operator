@@ -226,9 +226,9 @@ func TestUpdatePreservesFinalizers(t *testing.T) {
 		t.Fatalf("spec.address after update %#v", body["spec"])
 	}
 	meta := asMap(t, body["metadata"])
-	finalizers, _ := meta["finalizers"].([]any)
+	finalizers := sliceField(t, meta, "finalizers")
 	if len(finalizers) != 1 || finalizers[0] != "mikrotik.operator.io/managed-config" {
-		t.Fatalf("finalizers = %#v, want [mikrotik.operator.io/managed-config]", meta["finalizers"])
+		t.Fatalf("finalizers = %#v, want [mikrotik.operator.io/managed-config]", finalizers)
 	}
 	annotations := asMap(t, meta["annotations"])
 	if annotations["mikrotik.operator.io/router-targets"] != "edge" {
