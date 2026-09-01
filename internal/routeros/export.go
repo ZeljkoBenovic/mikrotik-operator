@@ -2,6 +2,7 @@ package routeros
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -142,7 +143,7 @@ func (a *apiClient) importViaFile(ctx context.Context, script string) error {
 	removeErr := a.removeFileByName(ctx, fileName)
 	if importErr != nil {
 		if removeErr != nil {
-			return fmt.Errorf("%w; remove restore file: %v", importErr, removeErr)
+			return errors.Join(importErr, fmt.Errorf("remove restore file: %w", removeErr))
 		}
 		return importErr
 	}
@@ -371,6 +372,9 @@ func (a *apiClient) removeFileByName(ctx context.Context, name string) error {
 	}
 	for _, sentence := range reply.Re {
 		if sentence == nil {
+			continue
+		}
+		if sentence.Map["name"] != name {
 			continue
 		}
 		id := sentence.Map[".id"]

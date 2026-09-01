@@ -429,6 +429,35 @@ func TestImport_DoesNotFallBackToSystemScript(t *testing.T) {
 	}
 }
 
+func TestImport_CleanupOnlyRemovesMatchingRestoreFile(t *testing.T) {
+	wrongFile := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{".id": "*10", "name": "unrelated.rsc"},
+	}}}
+	empty := &routeros.Reply{}
+	created := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{".id": "*9", "name": restoreFileName},
+	}}}
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty},   // remove restore.rsc
+			{reply: empty},   // remove restore.rsc.txt
+			{reply: created}, // /file/print file=
+			{reply: empty},   // /file/set
+			{reply: empty},   // /import
+			{reply: wrongFile},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	if err := api.Import(context.Background(), "/ip dns\n"); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range scripted.calls {
+		if len(call) > 0 && call[0] == "/file/remove" {
+			t.Fatalf("removed unrelated file: %#v", call)
+		}
+	}
+}
+
 func sameArgs(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
