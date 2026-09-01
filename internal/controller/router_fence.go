@@ -84,9 +84,10 @@ func withRouterConnections(
 	requireActive bool,
 	operation func(api.MikroTikRouter, []routerConnection) error,
 ) error {
+	key = normalizeRouterLookupKey(key)
 	return routerOperationFences.withFence(ctx, key, func() error {
-		var router api.MikroTikRouter
-		if err := kube.Get(ctx, key, &router); err != nil {
+		router, err := getMikroTikRouter(ctx, kube, key)
+		if err != nil {
 			return err
 		}
 		if requireActive {

@@ -7,6 +7,11 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Resolve `namespace/name` router refs to the namespaced `MikroTikRouter`
+  object instead of treating the whole string as a resource name.
+
 ## [0.3.0] - 2026-09-01
 
 ### Added
