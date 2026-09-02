@@ -7,15 +7,17 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
-### Changed
-
-- Replace GNU Make with [just](https://github.com/casey/just) for local and
-  CI recipes. CI installs a pinned just release and runs the shared
-  formatting, test, vet, build, Helm, and E2E recipes.
 ### Added
 
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
   Operator `appVersion` remains `v0.4.0`.
+
+### Tests
+
+- Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
+  validation, DNS NodePort address selection, generated-child cleanup when
+  public-IP router selection is ambiguous, and unowned cluster-route name
+  collisions.
 
 ## [0.4.0] - 2026-09-01
 

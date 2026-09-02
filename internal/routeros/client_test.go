@@ -889,6 +889,291 @@ func TestDeleteManagedConfiguration_RemovesOnlyManagedComments(t *testing.T) {
 	}
 }
 
+func TestEnsureRoute_AddsWhenMissingAndSkipsWhenMatching(t *testing.T) {
+	comment := ManagedComment("route", "web", "apps")
+	empty := &routeros.Reply{}
+	matching := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{
+			"dst-address": "10.0.0.8/32",
+			"gateway":     "192.0.2.10",
+			"comment":     comment,
+		},
+	}}}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty},
+			{reply: empty},
+			{reply: &routeros.Reply{}},
+			{reply: matching},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	if err := api.EnsureRoute(context.Background(), "10.0.0.8/32", "192.0.2.10", comment); err != nil {
+		t.Fatalf("EnsureRoute() create error = %v", err)
+	}
+	if len(client.calls) != 3 {
+		t.Fatalf("create command count = %d, want 3", len(client.calls))
+	}
+	add := client.calls[2]
+	if len(add) == 0 || add[0] != "/ip/route/add" {
+		t.Fatalf("create command = %v, want /ip/route/add", add)
+	}
+	for _, arg := range []string{
+		"=dst-address=10.0.0.8/32",
+		"=gateway=192.0.2.10",
+		"=comment=" + comment,
+	} {
+		if !commandHasArg(add, arg) {
+			t.Fatalf("add command %v missing %s", add, arg)
+		}
+	}
+	if commandHasArgPrefix(add, "=distance=") {
+		t.Fatalf("zero distance still set distance: %v", add)
+	}
+
+	if err := api.EnsureRoute(context.Background(), "10.0.0.8/32", "192.0.2.10", comment); err != nil {
+		t.Fatalf("EnsureRoute() skip error = %v", err)
+	}
+	if len(client.calls) != 4 {
+		t.Fatalf("skip command count = %d, want 4", len(client.calls))
+	}
+	if client.calls[3][0] != "/ip/route/print" {
+		t.Fatalf("matching route issued %v", client.calls[3])
+	}
+}
+
+func TestEnsureRoute_RecreatesOnDriftAndIgnoresDistanceWhenUnspecified(t *testing.T) {
+	comment := ManagedComment("route", "web", "apps")
+	drifted := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{
+			".id":         "*9",
+			"dst-address": "10.0.0.9/32",
+			"gateway":     "192.0.2.10",
+			"distance":    "1",
+			"comment":     comment,
+		},
+	}}}
+	matchingWithDistance := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{
+			"dst-address": "10.0.0.8/32",
+			"gateway":     "192.0.2.10",
+			"distance":    "5",
+			"comment":     comment,
+		},
+	}}}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: drifted},
+			{reply: drifted},
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+			{reply: matchingWithDistance},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	if err := api.EnsureRoute(context.Background(), "10.0.0.8/32", "192.0.2.10", comment); err != nil {
+		t.Fatalf("EnsureRoute() recreate error = %v", err)
+	}
+	removed := false
+	added := false
+	for _, call := range client.calls[:4] {
+		if len(call) == 0 {
+			continue
+		}
+		if call[0] == "/ip/route/remove" && commandHasArg(call, "=.id=*9") {
+			removed = true
+		}
+		if call[0] == "/ip/route/add" {
+			added = true
+			if !commandHasArg(call, "=dst-address=10.0.0.8/32") {
+				t.Fatalf("recreate add missing destination: %v", call)
+			}
+		}
+	}
+	if !removed {
+		t.Fatal("drifted route was not removed")
+	}
+	if !added {
+		t.Fatal("replacement route was not added")
+	}
+
+	if err := api.EnsureRoute(context.Background(), "10.0.0.8/32", "192.0.2.10", comment); err != nil {
+		t.Fatalf("EnsureRoute() zero-distance skip error = %v", err)
+	}
+	if len(client.calls) != 5 {
+		t.Fatalf("zero-distance skip command count = %d, want 5", len(client.calls))
+	}
+}
+
+func TestEnsureRouteWithDistance_SetsPositiveDistanceAndSkipsWhenMatching(t *testing.T) {
+	comment := ManagedComment("route", "web", "apps")
+	empty := &routeros.Reply{}
+	matching := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{
+			"dst-address": "10.0.0.8/32",
+			"gateway":     "192.0.2.10",
+			"distance":    "20",
+			"comment":     comment,
+		},
+	}}}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty},
+			{reply: empty},
+			{reply: &routeros.Reply{}},
+			{reply: matching},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	if err := api.EnsureRouteWithDistance(context.Background(), "10.0.0.8/32", "192.0.2.10", 20, comment); err != nil {
+		t.Fatalf("EnsureRouteWithDistance() create error = %v", err)
+	}
+	add := client.calls[2]
+	if !commandHasArg(add, "=distance=20") {
+		t.Fatalf("add command %v missing =distance=20", add)
+	}
+
+	if err := api.EnsureRouteWithDistance(context.Background(), "10.0.0.8/32", "192.0.2.10", 20, comment); err != nil {
+		t.Fatalf("EnsureRouteWithDistance() skip error = %v", err)
+	}
+	if len(client.calls) != 4 {
+		t.Fatalf("skip command count = %d, want 4", len(client.calls))
+	}
+}
+
+func TestEnsureRoutes_RemovesStalePrefixMatchesAndKeepsDesired(t *testing.T) {
+	prefix := ManagedComment("route", "web", "apps")
+	printExisting := &routeros.Reply{Re: []*proto.Sentence{
+		{Map: map[string]string{".id": "*1", "comment": prefix + "/192.0.2.10"}},
+		{Map: map[string]string{".id": "*2", "comment": prefix + "/192.0.2.11"}},
+		{Map: map[string]string{".id": "*3", "comment": "user-static"}},
+	}}
+	matchingKeep := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{
+			"dst-address": "10.0.0.8/32",
+			"gateway":     "192.0.2.10",
+			"comment":     prefix + "/192.0.2.10",
+		},
+	}}}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: printExisting},
+			{reply: &routeros.Reply{}},
+			{reply: matchingKeep},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	if err := api.EnsureRoutes(context.Background(), "10.0.0.8/32", []string{"192.0.2.10"}, prefix); err != nil {
+		t.Fatalf("EnsureRoutes() error = %v", err)
+	}
+	removed := []string{}
+	added := 0
+	for _, call := range client.calls {
+		if len(call) == 0 {
+			continue
+		}
+		if call[0] == "/ip/route/remove" {
+			for _, arg := range call {
+				if strings.HasPrefix(arg, "=.id=") {
+					removed = append(removed, strings.TrimPrefix(arg, "=.id="))
+				}
+			}
+		}
+		if call[0] == "/ip/route/add" {
+			added++
+		}
+	}
+	if want := []string{"*2"}; !stringSliceEqual(removed, want) {
+		t.Fatalf("removed ids = %v, want %v (must not remove desired or unmanaged routes)", removed, want)
+	}
+	if added != 0 {
+		t.Fatalf("matching desired route was re-added %d times", added)
+	}
+}
+
+func TestDeleteRoute_RemovesExactCommentOnly(t *testing.T) {
+	comment := ManagedComment("route", "web", "apps")
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: &routeros.Reply{Re: []*proto.Sentence{
+				{Map: map[string]string{".id": "*1", "comment": comment}},
+				{Map: map[string]string{".id": "*2", "comment": comment + "/192.0.2.10"}},
+				{Map: map[string]string{".id": "*3", "comment": "user-static"}},
+			}}},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+	if err := api.DeleteRoute(context.Background(), comment); err != nil {
+		t.Fatalf("DeleteRoute() error = %v", err)
+	}
+	removed := removeIDs(client.calls)
+	if want := []string{"*1"}; !stringSliceEqual(removed, want) {
+		t.Fatalf("removed ids = %v, want %v", removed, want)
+	}
+}
+
+func TestDeleteRoutesByPrefix_RemovesPrefixedComments(t *testing.T) {
+	prefix := ManagedComment("route", "web", "apps")
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: &routeros.Reply{Re: []*proto.Sentence{
+				{Map: map[string]string{".id": "*1", "comment": prefix}},
+				{Map: map[string]string{".id": "*2", "comment": prefix + "/192.0.2.10"}},
+				{Map: map[string]string{".id": "*3", "comment": prefix + "extra"}},
+				{Map: map[string]string{".id": "*4", "comment": "user-static"}},
+			}}},
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+	if err := api.DeleteRoutesByPrefix(context.Background(), prefix); err != nil {
+		t.Fatalf("DeleteRoutesByPrefix() error = %v", err)
+	}
+	removed := removeIDs(client.calls)
+	if want := []string{"*1", "*2"}; !stringSliceEqual(removed, want) {
+		t.Fatalf("removed ids = %v, want %v", removed, want)
+	}
+}
+
+func commandHasArg(call []string, want string) bool {
+	for _, arg := range call {
+		if arg == want {
+			return true
+		}
+	}
+	return false
+}
+
+func commandHasArgPrefix(call []string, prefix string) bool {
+	for _, arg := range call {
+		if strings.HasPrefix(arg, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func removeIDs(calls [][]string) []string {
+	removed := []string{}
+	for _, call := range calls {
+		if len(call) == 0 || !strings.HasSuffix(call[0], "/remove") {
+			continue
+		}
+		for _, arg := range call {
+			if strings.HasPrefix(arg, "=.id=") {
+				removed = append(removed, strings.TrimPrefix(arg, "=.id="))
+			}
+		}
+	}
+	return removed
+}
+
 func stringSliceEqual(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
@@ -9,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -295,6 +297,57 @@ func TestReconcileOwnedClusterRoutesDeletesEmptyDesiredSet(t *testing.T) {
 	}
 	if len(list.Items) != 0 {
 		t.Fatalf("owned routes remained: %#v", list.Items)
+	}
+}
+
+func TestReconcileOwnedClusterRoutesRejectsUnownedNameCollision(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app", UID: "service-uid"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8"},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	candidates, err := desiredClusterRouteCandidates(context.Background(), clusterRouteReconcileRequest{
+		kube:       fake.NewClientBuilder().WithScheme(scheme).WithObjects(&node).Build(),
+		owner:      &service,
+		sourceName: "service/" + service.Name,
+		namespace:  service.Namespace,
+		services:   []corev1.Service{service},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) == 0 {
+		t.Fatal("expected a desired cluster route candidate")
+	}
+	unowned := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: candidates[0].name, Namespace: service.Namespace},
+		Spec:       api.MikroTikRouteSpec{Destination: "10.0.0.8/32", Gateway: "192.0.2.10"},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &node, &unowned).Build()
+	err = reconcileOwnedClusterRoutes(context.Background(), clusterRouteReconcileRequest{
+		kube:       kube,
+		scheme:     scheme,
+		owner:      &service,
+		sourceName: "service/" + service.Name,
+		namespace:  service.Namespace,
+		services:   []corev1.Service{service},
+	})
+	if err == nil {
+		t.Fatal("expected unowned name collision error")
+	}
+	if !strings.Contains(err.Error(), "already exists and is not owned") {
+		t.Fatalf("error = %v, want ownership collision", err)
+	}
+	var stored api.MikroTikRoute
+	if getErr := kube.Get(context.Background(), types.NamespacedName{Name: unowned.Name, Namespace: unowned.Namespace}, &stored); getErr != nil {
+		t.Fatal(getErr)
+	}
+	if stored.Spec.Destination != unowned.Spec.Destination || metav1.IsControlledBy(&stored, &service) {
+		t.Fatalf("unowned route was mutated: %#v", stored)
 	}
 }
 

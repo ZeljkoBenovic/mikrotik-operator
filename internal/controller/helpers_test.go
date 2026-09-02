@@ -390,6 +390,101 @@ func TestReadyConditionChangesTransitionTimeWhenStateChanges(t *testing.T) {
 	}
 }
 
+func TestServiceAddress(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
+			{Type: corev1.NodeHostName, Address: "node-a"},
+			{Type: corev1.NodeInternalIP, Address: "192.0.2.10"},
+		}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&node).Build()
+	tests := []struct {
+		name    string
+		service corev1.Service
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "cluster IP",
+			service: corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+				Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8"},
+			},
+			want: "10.0.0.8",
+		},
+		{
+			name: "headless cluster IP",
+			service: corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+				Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: corev1.ClusterIPNone},
+			},
+			wantErr: true,
+		},
+		{
+			name: "missing cluster IP",
+			service: corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+				Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP},
+			},
+			wantErr: true,
+		},
+		{
+			name: "node port uses node InternalIP",
+			service: corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+				Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeNodePort, ClusterIP: "10.0.0.8"},
+			},
+			want: "192.0.2.10",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := serviceAddress(context.Background(), kube, test.service)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if !errors.Is(err, errServiceNotAddressable) {
+					t.Fatalf("error = %v, want %v", err, errServiceNotAddressable)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Fatalf("serviceAddress() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestServiceAddressRejectsNodePortWithoutInternalIP(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	kube := fake.NewClientBuilder().WithScheme(scheme).Build()
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeNodePort, ClusterIP: "10.0.0.8"},
+	}
+	_, err := serviceAddress(context.Background(), kube, service)
+	if !errors.Is(err, errServiceNotAddressable) {
+		t.Fatalf("error = %v, want %v", err, errServiceNotAddressable)
+	}
+}
+
+func TestAppendUniqueServicePort(t *testing.T) {
+	http := corev1.ServicePort{Name: "http", Port: 80, Protocol: corev1.ProtocolTCP}
+	https := corev1.ServicePort{Name: "https", Port: 443, Protocol: corev1.ProtocolTCP}
+	got := appendUniqueServicePort(nil, http)
+	got = appendUniqueServicePort(got, http)
+	got = appendUniqueServicePort(got, https)
+	if len(got) != 2 || got[0] != http || got[1] != https {
+		t.Fatalf("ports = %#v, want [http https]", got)
+	}
+}
+
 func TestPortForwardDestinationAddress(t *testing.T) {
 	tests := []struct {
 		name  string

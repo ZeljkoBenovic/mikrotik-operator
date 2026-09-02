@@ -23,6 +23,52 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
+func TestIsServiceBackend(t *testing.T) {
+	serviceKind := gatewayv1.Kind("Service")
+	podKind := gatewayv1.Kind("Pod")
+	coreGroup := gatewayv1.Group("")
+	otherGroup := gatewayv1.Group("apps")
+	tests := []struct {
+		name    string
+		backend gatewayv1.HTTPBackendRef
+		want    bool
+	}{
+		{name: "core service by name", backend: httpBackendRef("web", "", 80), want: true},
+		{
+			name: "explicit Service kind",
+			backend: gatewayv1.HTTPBackendRef{BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{
+				Group: &coreGroup, Kind: &serviceKind, Name: "web",
+			}}},
+			want: true,
+		},
+		{
+			name: "empty name",
+			backend: gatewayv1.HTTPBackendRef{BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{
+				Kind: &serviceKind,
+			}}},
+		},
+		{
+			name: "non-service kind",
+			backend: gatewayv1.HTTPBackendRef{BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{
+				Kind: &podKind, Name: "web",
+			}}},
+		},
+		{
+			name: "non-core group",
+			backend: gatewayv1.HTTPBackendRef{BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{
+				Group: &otherGroup, Kind: &serviceKind, Name: "web",
+			}}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isServiceBackend(test.backend); got != test.want {
+				t.Fatalf("isServiceBackend() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func TestCrossNamespaceGatewayParentDoesNotRequireReferenceGrant(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := gatewayv1.Install(scheme); err != nil {
