@@ -12,6 +12,10 @@ and the project follows semantic versioning.
 - Replace GNU Make with [just](https://github.com/casey/just) for local and
   CI recipes. CI installs a pinned just release and runs the shared
   formatting, test, vet, build, Helm, and E2E recipes.
+### Added
+
+- `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
+  Operator `appVersion` remains `v0.4.0`.
 
 ## [0.4.0] - 2026-09-01
 
@@ -90,7 +94,9 @@ and the project follows semantic versioning.
 - Improved repository guidance and AI-assisted contribution workflows.
 - Added grouped Dependabot updates for Go, GitHub Actions, and container images.
 
-## [0.3.0] - 2026-08-29
+## [0.3.0-pre] - 2026-08-29
+
+Historical pre-release notes from before the chart reached 0.3.0.
 
 ### Added
 
