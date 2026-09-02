@@ -7,6 +7,11 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Replace GNU Make with [just](https://github.com/casey/just) for local and
+  CI recipes. CI installs a pinned just release and runs the shared
+  formatting, test, vet, build, Helm, and E2E recipes.
 ### Added
 
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.

@@ -152,8 +152,8 @@ refuses mutations so generated children stay in sync with the parent.
 **Cause:** Docker Desktop on WSL2 exposes a 9p mount whose options contain an
 unescaped space.
 
-**Solution:** `make k3s-install` applies `hack/k3s-wsl-docker-desktop.sh`,
-which hides that mount from k3s only. `make e2e-test` uses k3d and is
+**Solution:** `just k3s-install` applies `hack/k3s-wsl-docker-desktop.sh`,
+which hides that mount from k3s only. `just e2e-test` uses k3d and is
 unaffected.
 
 ## Problem: chart install pulls the wrong image

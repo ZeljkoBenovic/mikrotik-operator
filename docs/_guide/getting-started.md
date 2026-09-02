@@ -27,11 +27,11 @@ The repository includes a disposable RouterOS-backed test environment. It uses
 k3d (K3s in Docker) and the
 [`docker-routeros`](https://github.com/EvilFreelancer/docker-routeros) QEMU
 image running as a Docker container with its API published onto the k3d
-network. Install Docker, k3d, kubectl, Helm, Go, and a Linux shell such as WSL,
+network. Install just, Docker, k3d, kubectl, Helm, Go, and a Linux shell such as WSL,
 then run:
 
 ```sh
-make e2e-test
+just e2e-test
 ```
 
 The test creates and removes its own K3s cluster, Docker network, and RouterOS
@@ -132,7 +132,7 @@ network or behind an authenticating proxy.
 On a Linux host, install K3s and the chart with the UI enabled:
 
 ```sh
-make test-install-ui
+just test-install-ui
 ```
 
 Or upgrade an existing chart install:

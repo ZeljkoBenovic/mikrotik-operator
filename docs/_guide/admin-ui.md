@@ -23,7 +23,7 @@ The panel is disabled by default.
 
 ## Enable the UI
 
-On a Linux host, `make test-install-ui` installs K3s and the chart with the
+On a Linux host, `just test-install-ui` installs K3s and the chart with the
 UI enabled. For an existing cluster:
 
 ```sh
@@ -110,7 +110,7 @@ cd web/ui && npm ci && npm run dev
 ```
 
 Open `http://127.0.0.1:5173`. See [`web/ui/README.md`](https://github.com/ZeljkoBenovic/mikrotik-operator/blob/main/web/ui/README.md)
-for scripts and routes. `make e2e-ui-test` starts k3d, installs the chart
+for scripts and routes. `just e2e-ui-test` starts k3d, installs the chart
 with the UI enabled, and exercises create/update/delete over HTTP. It does
 not start RouterOS.
 
