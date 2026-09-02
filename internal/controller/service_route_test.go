@@ -237,6 +237,69 @@ func TestServiceDNSReconcilerDoesNotCreateRouteForNodePort(t *testing.T) {
 	}
 }
 
+func TestServiceDNSReconcilerCleansGeneratedChildrenWhenPublicIPRouterIsAmbiguous(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "web",
+			Namespace: "app",
+			UID:       "service-uid",
+			Annotations: map[string]string{
+				api.PublicIPAnnotation: "203.0.113.10",
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Type:      corev1.ServiceTypeClusterIP,
+			ClusterIP: "10.0.0.8",
+			Ports:     []corev1.ServicePort{{Name: "http", Port: 80}},
+		},
+	}
+	first := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "network"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.168.88.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	second := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "core", Namespace: "other"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "10.0.0.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{Name: "web-dns", Namespace: service.Namespace},
+		Spec:       api.MikroTikDNSRecordSpec{Name: "web.home.arpa", Address: "10.0.0.8"},
+	}
+	if err := controllerutil.SetControllerReference(&service, &record, scheme); err != nil {
+		t.Fatal(err)
+	}
+	leftover := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "rt-leftover", Namespace: service.Namespace},
+		Spec:       api.MikroTikRouteSpec{Destination: "10.0.0.8/32", Gateway: "192.0.2.10"},
+	}
+	if err := controllerutil.SetControllerReference(&service, &leftover, scheme); err != nil {
+		t.Fatal(err)
+	}
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{Name: "pf-leftover", Namespace: service.Namespace},
+		Spec:       api.MikroTikPortForwardSpec{Protocol: "tcp", ExternalPort: 80, TargetPort: 80, TargetAddress: "10.0.0.8"},
+	}
+	if err := controllerutil.SetControllerReference(&service, &forward, scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &first, &second, &record, &leftover, &forward).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	_, err := reconciler.Reconcile(context.Background(), reconcileRequest(service.Namespace, service.Name))
+	if !errors.Is(err, errImplicitRouterSelection) {
+		t.Fatalf("got %v, want %v", err, errImplicitRouterSelection)
+	}
+	assertNotFound(t, kube, &api.MikroTikDNSRecord{}, record.Namespace, record.Name)
+	assertNotFound(t, kube, &api.MikroTikRoute{}, leftover.Namespace, leftover.Name)
+	assertNotFound(t, kube, &api.MikroTikPortForward{}, forward.Namespace, forward.Name)
+}
+
 func TestIngressReconcilerCreatesOwnedRouteCRsWithoutRouterOS(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	className := api.IngressClassName
@@ -355,6 +418,54 @@ func TestDNSReconcilerCreatesOwnedRouteCRsForStandaloneServiceRef(t *testing.T) 
 	}
 	if routes[0].Spec.Destination != "10.0.0.8/32" {
 		t.Fatalf("destination %q, want 10.0.0.8/32", routes[0].Spec.Destination)
+	}
+}
+
+func TestDNSReconcilerUsesNodePortInternalIP(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{Name: "primary", Address: "192.0.2.1", CredentialsSecret: corev1.LocalObjectReference{Name: "creds"}}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "app"}, Data: map[string][]byte{"username": []byte("admin"), "password": []byte("x")}}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeNodePort, ClusterIP: "10.0.0.8", Ports: []corev1.ServicePort{{Port: 80, NodePort: 30080}}},
+	}
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "nodeport", Namespace: "app", UID: "dns-uid",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikDNSRecordSpec{
+			RouterRef: router.Name, Name: "backend.home.arpa",
+			ServiceRef: &api.NamespacedName{Namespace: "app", Name: "backend"},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&router, &secret, &service, &record, &node).
+		WithStatusSubresource(&router, &record).Build()
+	reconciler := DNSReconciler{
+		Client: kube,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			return routerClient, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if len(routerClient.ensuredDNSAddresses) == 0 {
+		t.Fatal("DNS reconciler did not apply the DNS record")
+	}
+	if got := routerClient.ensuredDNSAddresses[len(routerClient.ensuredDNSAddresses)-1]; got != "192.0.2.10" {
+		t.Fatalf("EnsureDNS address = %q, want node InternalIP 192.0.2.10", got)
 	}
 }
 
