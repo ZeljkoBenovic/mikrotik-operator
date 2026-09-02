@@ -34,6 +34,11 @@ features:
     details: Optional panel for listing and creating MikroTik custom resources.
     link: /admin-ui/
     link_text: Admin UI
+  - icon: 💾
+    title: Backup and restore
+    details: Text /export snapshots and confirmed /import onto a router.
+    link: /backup-restore/
+    link_text: Backup and restore
   - icon: 📘
     title: Reference
     details: Annotations, custom resources, Helm values, and ownership comments.
@@ -52,13 +57,18 @@ features:
 | `MikroTikRoute` | `/ip route` |
 | `MikroTikPortForward` | `dst-nat`, `src-nat`, and forward firewall rules |
 | `MikroTikFirewallRule` | `/ip firewall filter` |
+| `MikroTikBackup` | Text `/export` snapshot or cron policy |
+| `MikroTikRestore` | Confirmed `/import` of a stored export |
 
 ## Safety model
 
 Every generated RouterOS entry has a managed comment containing its Kubernetes
 resource identity. Reconciliation is idempotent and periodic drift checks
 restore changes made outside Kubernetes. Existing RouterOS entries without the
-operator's managed comment are not modified or deleted.
+operator's managed comment are not modified or deleted by DNS, route, NAT, or
+firewall reconcilers. Confirmed restore is the unmanaged-config exception: it
+runs `/import` of a stored `/export` and does not wipe the device. See
+[Backup and restore]({% link _guide/backup-restore.md %}).
 
 ## Project links
 

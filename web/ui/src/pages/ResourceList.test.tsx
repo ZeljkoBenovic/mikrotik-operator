@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ResourceList } from '../pages/ResourceList'
 import { jsonResponse, renderWithProviders } from '../test/render'
-import { dnsKind, ownedDNS, routerKind, standaloneRouter } from '../test/fixtures'
+import { dnsKind, ownedDNS, restoreKind, restoreResource, routerKind, standaloneRouter } from '../test/fixtures'
 
 describe('ResourceList', () => {
   it('disables edit and delete for owned resources', async () => {
@@ -46,6 +46,33 @@ describe('ResourceList', () => {
     renderWithProviders(<ResourceList kind={routerKind} />, { route: '/routers', path: '/routers' })
     expect(await screen.findByText('edge')).toBeInTheDocument()
     expect(screen.getByTitle('Edit')).toBeEnabled()
+    expect(screen.getByTitle('Delete')).toBeEnabled()
+  })
+
+  it('does not offer edit for an applied restore', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.startsWith('/api/resources/mikrotikrestores')) {
+          return jsonResponse({
+            items: [
+              restoreResource({
+                spec: { backupRef: { name: 'once' }, routerRef: 'edge', confirm: 'RESTORE' },
+                status: { applied: true, conditions: [{ type: 'Ready', status: 'True', reason: 'Applied' }] },
+              }),
+            ],
+          })
+        }
+        return jsonResponse({ items: [] })
+      }),
+    )
+    renderWithProviders(<ResourceList kind={restoreKind} />, {
+      route: '/restores',
+      path: '/restores',
+    })
+    expect(await screen.findByText('bring-up')).toBeInTheDocument()
+    expect(screen.getByTitle('Applied restores are read-only')).toBeDisabled()
     expect(screen.getByTitle('Delete')).toBeEnabled()
   })
 

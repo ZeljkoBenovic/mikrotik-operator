@@ -400,6 +400,10 @@ type recordingRouterClient struct {
 	ensuredFirewallRules    []ros.FirewallRule
 	ensuredFirewallComments []string
 	deletedFirewallComments []string
+	exportText              string
+	imported                []string
+	exportErr               error
+	importErr               error
 }
 
 func (client *recordingRouterClient) EnsureDNS(context.Context, string, string, string, string) error {
@@ -451,6 +455,22 @@ func (client *recordingRouterClient) DeleteFirewallRule(_ context.Context, comme
 }
 func (client *recordingRouterClient) DeleteManagedConfiguration(context.Context) error {
 	client.deletedManaged++
+	return nil
+}
+func (client *recordingRouterClient) Export(context.Context) (string, error) {
+	if client.exportErr != nil {
+		return "", client.exportErr
+	}
+	if client.exportText == "" {
+		return "/ip dns set servers=1.1.1.1\n", nil
+	}
+	return client.exportText, nil
+}
+func (client *recordingRouterClient) Import(_ context.Context, script string) error {
+	if client.importErr != nil {
+		return client.importErr
+	}
+	client.imported = append(client.imported, script)
 	return nil
 }
 func (*recordingRouterClient) Close() error { return nil }

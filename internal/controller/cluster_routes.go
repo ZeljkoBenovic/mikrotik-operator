@@ -191,8 +191,8 @@ func clusterRouteHops(
 		return hopsWithOrigin(nodes, clusterRouteOriginNodes), nil
 	}
 	key := routerKeyFromRef(ownerNamespace, routerRef)
-	router, err := getMikroTikRouter(ctx, kube, key)
-	if err != nil {
+	var router api.MikroTikRouter
+	if err := kube.Get(ctx, key, &router); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("MikroTikRouter %s/%s not found: %w", key.Namespace, key.Name, err)
 		}

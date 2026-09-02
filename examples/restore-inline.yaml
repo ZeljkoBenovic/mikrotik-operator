@@ -1,0 +1,15 @@
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikRestore
+metadata:
+  name: spare-router
+  namespace: default
+spec:
+  backupRef:
+    name: edge-now
+  connection:
+    address: 192.168.88.1
+    port: 8729
+    tls: true
+    credentialsSecret:
+      name: spare-credentials
+  # confirm: RESTORE

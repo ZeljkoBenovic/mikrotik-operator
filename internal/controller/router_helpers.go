@@ -107,59 +107,6 @@ func endpointClaimedByOtherRouter(ctx context.Context, kube client.Client, route
 	return false, nil
 }
 
-func normalizeRouterLookupKey(key types.NamespacedName) types.NamespacedName {
-	if key.Name == "" {
-		return key
-	}
-	parsed := routerKeyFromRef(key.Namespace, key.Name)
-	if parsed.Name != "" {
-		return parsed
-	}
-	return key
-}
-
-func getMikroTikRouter(ctx context.Context, kube client.Client, key types.NamespacedName) (api.MikroTikRouter, error) {
-	key = normalizeRouterLookupKey(key)
-	if key.Name == "" || strings.Contains(key.Name, "/") {
-		return api.MikroTikRouter{}, apierrors.NewNotFound(
-			api.GroupVersion.WithResource("mikrotikrouters").GroupResource(),
-			key.Name,
-		)
-	}
-	var router api.MikroTikRouter
-	err := kube.Get(ctx, key, &router)
-	if err == nil {
-		return router, nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return api.MikroTikRouter{}, err
-	}
-	found, ok, listErr := listMikroTikRouter(ctx, kube, key)
-	if listErr != nil {
-		return api.MikroTikRouter{}, listErr
-	}
-	if ok {
-		return found, nil
-	}
-	return api.MikroTikRouter{}, err
-}
-
-func listMikroTikRouter(ctx context.Context, kube client.Client, key types.NamespacedName) (api.MikroTikRouter, bool, error) {
-	if key.Namespace == "" || key.Name == "" {
-		return api.MikroTikRouter{}, false, nil
-	}
-	var routers api.MikroTikRouterList
-	if err := kube.List(ctx, &routers, client.InNamespace(key.Namespace)); err != nil {
-		return api.MikroTikRouter{}, false, err
-	}
-	for _, candidate := range liveRouters(routers.Items) {
-		if candidate.Name == key.Name {
-			return candidate, true, nil
-		}
-	}
-	return api.MikroTikRouter{}, false, nil
-}
-
 func durableRouterTargets(object client.Object, additional ...string) []string {
 	seen := make(map[string]struct{})
 	targets := make([]string, 0, len(additional)+1)

@@ -1,6 +1,6 @@
 IMG ?= ghcr.io/zeljkobenovic/mikrotik-operator:latest
 IMAGE_REPOSITORY ?= ghcr.io/zeljkobenovic/mikrotik-operator
-IMAGE_TAG ?= v0.4.0
+IMAGE_TAG ?= v0.2.0
 K3S_VERSION ?= v1.36.4+k3s1
 K3S_CHANNEL ?= stable
 K3S_URL ?= https://get.k3s.io

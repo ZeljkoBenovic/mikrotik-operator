@@ -17,7 +17,9 @@ for installation, usage, reference, architecture, and
 
 It creates DNS records, routes, NAT port forwards, and firewall rules while
 only managing configuration entries that it owns. Existing RouterOS rules are
-left untouched.
+left untouched. Confirmed `MikroTikRestore` runs `/import` of a stored
+`/export`; that does not wipe the device. See
+[`docs/_guide/backup-restore.md`](docs/_guide/backup-restore.md).
 
 ## Features
 
@@ -31,7 +33,8 @@ left untouched.
   optional single-node mode.
 - Destination NAT and matching source masquerade rules for exposed Services.
 - Managed forward firewall rules for port forwards.
-- Custom resources for DNS records, routes, port forwards, and firewall rules.
+- Custom resources for DNS records, routes, port forwards, firewall rules,
+  text `/export` backups, and confirmed restores.
 - Idempotent reconciliation and periodic drift correction.
 - Optional admin UI for listing, inspecting, and creating custom resources.
 
@@ -50,6 +53,8 @@ The core resources are namespaced:
 | `MikroTikRoute` | `/ip route` entry |
 | `MikroTikPortForward` | `dst-nat`, `src-nat`, and forward firewall rules |
 | `MikroTikFirewallRule` | Custom `/ip firewall filter` entry |
+| `MikroTikBackup` | Text `/export` snapshot, or a cron policy that owns snapshots |
+| `MikroTikRestore` | Confirmed `/import` onto a router CR or inline address |
 
 `routerRef` is optional when exactly one non-deleting `MikroTikRouter` exists
 in the resource namespace, or when that namespace has none and exactly one
@@ -86,7 +91,7 @@ The chart installs the operator, RBAC, CRDs, probes, and the `mikrotik`
 helm upgrade --install mikrotik-operator ./charts/mikrotik-operator \
   --namespace mikrotik-operator-system \
   --create-namespace \
-  --set image.tag=v0.4.0
+  --set image.tag=v0.2.0
 ```
 
 The raw Kubernetes resources are also available under [`config/`](config/).
@@ -94,9 +99,10 @@ The raw Kubernetes resources are also available under [`config/`](config/).
 ## Admin UI
 
 The chart can deploy an optional browser panel for routers, DNS records,
-routes, port forwards, and firewall rules. It is **disabled by default** and
-has **no authentication**. Enable it only on a trusted network or behind an
-authenticating proxy.
+routes, port forwards, firewall rules, backups, and restores. It is
+**disabled by default** and has **no authentication**. Enable it only on a
+trusted network or behind an authenticating proxy. Restores include a
+confirmation dialog before `/import`.
 
 ```sh
 helm upgrade --install mikrotik-operator ./charts/mikrotik-operator \
@@ -113,21 +119,19 @@ kubectl -n mikrotik-operator-system port-forward \
 ```
 
 On a Linux host, `make test-install-ui` installs K3s and the chart with the
-UI enabled. See [`docs/_guide/admin-ui.md`](docs/_guide/admin-ui.md) for the
-full guide.
+UI enabled. See [`docs/_guide/admin-ui.md`](docs/_guide/admin-ui.md) for the full guide.
 
-![Admin UI dashboard with per-kind counts including Routes and a not-ready resources table](docs/images/ui-dashboard.png)
+![Admin UI dashboard with per-kind counts and not-ready resources](docs/images/ui-dashboard.png)
 
-The dashboard shows counts for routers, DNS records, routes, port forwards,
-and firewall rules, plus objects that are not Ready.
+The dashboard shows counts for each custom resource kind and highlights
+objects that are not Ready.
 
-![DNS Records list with search, Create, a searchable namespace filter, and an ellipsized ownership badge](docs/images/ui-dns-records.png)
+![DNS record list with managed and standalone resources](docs/images/ui-dns-records.png)
 
-List pages include name/spec search, a searchable namespace filter, and
-create/edit/delete for standalone resources. Ownership badges truncate with
-an ellipsis; hover to read the full `Managed · Service/namespace/name` text.
+List pages support namespace filtering, search, and create/edit/delete for
+standalone resources.
 
-![Owned DNS record shown as read-only with disabled Edit/Delete and a Managed by Service banner](docs/images/ui-owned-dns-record.png)
+![Owned DNS record shown as read-only and managed by a Service](docs/images/ui-owned-dns-record.png)
 
 Resources generated from a `Service`, `Ingress`, or `HTTPRoute` show a
 **Managed by** banner. Edit and delete are disabled; change the owning
@@ -197,8 +201,8 @@ make test-install-ui
 ```
 
 `make test-install UI_ENABLED=true` does the same. After install, port-forward
-the UI Service as described in [`docs/_guide/admin-ui.md`](docs/_guide/admin-ui.md).
-Override `IMAGE_TAG` to pin operator and UI images together.
+the UI Service as described in [`docs/_guide/admin-ui.md`](docs/_guide/admin-ui.md). Override
+`IMAGE_TAG` to pin operator and UI images together.
 
 On WSL2, Docker Desktop adds a `/Docker/host` mount whose options contain an
 unescaped space. Kubelet treats that as a fatal `/proc/mounts` parse error and
@@ -260,8 +264,11 @@ opening a pull request. Use the repository issue forms for bug reports and
 feature requests.
 
 The operator architecture is documented in
-[`docs/_reference/how-it-works.md`](docs/_reference/how-it-works.md). Operational failures and
-common pitfalls are in [`docs/_guide/troubleshooting.md`](docs/_guide/troubleshooting.md).
+[`docs/_reference/how-it-works.md`](docs/_reference/how-it-works.md). Backup
+and restore are in
+[`docs/_guide/backup-restore.md`](docs/_guide/backup-restore.md). Operational
+failures and common pitfalls are in
+[`docs/_guide/troubleshooting.md`](docs/_guide/troubleshooting.md).
 
 Use a dedicated RouterOS account with only the API policies required by the
 deployment, and keep RouterOS reachable from the operator Pod over TCP 8728

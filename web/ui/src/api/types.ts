@@ -6,6 +6,8 @@ export type ApiKindSlug =
   | 'mikrotikroutes'
   | 'mikrotikportforwards'
   | 'mikrotikfirewallrules'
+  | 'mikrotikbackups'
+  | 'mikrotikrestores'
 
 export type ApiKindName =
   | 'MikroTikRouter'
@@ -13,6 +15,8 @@ export type ApiKindName =
   | 'MikroTikRoute'
   | 'MikroTikPortForward'
   | 'MikroTikFirewallRule'
+  | 'MikroTikBackup'
+  | 'MikroTikRestore'
 
 export type ManagedBy = {
   apiVersion: string
@@ -157,12 +161,61 @@ export type MikroTikFirewallRuleStatus = {
   conditions?: Condition[]
 }
 
+export type MikroTikBackupSpec = {
+  routerRef: string
+  schedule?: string
+  retention?: number
+  remote?: {
+    enabled?: boolean
+    ftp?: Record<string, unknown>
+    smb?: Record<string, unknown>
+    s3?: Record<string, unknown>
+  }
+}
+
+export type MikroTikBackupStatus = {
+  role?: string
+  routerRef?: string
+  export?: string
+  exportBytes?: number
+  exportWarning?: string
+  capturedAt?: string
+  lastScheduleTime?: string
+  nextScheduleTime?: string
+  snapshotCount?: number
+  observedGeneration?: number
+  conditions?: Condition[]
+}
+
+export type MikroTikRestoreSpec = {
+  backupRef: NamespacedName
+  routerRef?: string
+  connection?: {
+    address: string
+    port?: number
+    tls?: boolean
+    credentialsSecret: LocalObjectReference
+  }
+  confirm?: string
+}
+
+export type MikroTikRestoreStatus = {
+  applied?: boolean
+  appliedAt?: string
+  backupUID?: string
+  target?: string
+  observedGeneration?: number
+  conditions?: Condition[]
+}
+
 export type KindSpec =
   | MikroTikRouterSpec
   | MikroTikDNSRecordSpec
   | MikroTikRouteSpec
   | MikroTikPortForwardSpec
   | MikroTikFirewallRuleSpec
+  | MikroTikBackupSpec
+  | MikroTikRestoreSpec
 
 export type KindStatus =
   | MikroTikRouterStatus
@@ -170,6 +223,8 @@ export type KindStatus =
   | MikroTikRouteStatus
   | MikroTikPortForwardStatus
   | MikroTikFirewallRuleStatus
+  | MikroTikBackupStatus
+  | MikroTikRestoreStatus
 
 export type ResourceObject = {
   apiVersion?: string

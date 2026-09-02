@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Troubleshooting
-nav_order: 4
+nav_order: 5
 redirect_from:
   - /troubleshooting.html
 ---
@@ -9,11 +9,13 @@ redirect_from:
 # Troubleshooting
 
 Use resource conditions first, then operator logs. Every custom resource has a
-single `Ready` condition. Failure reasons are `ConnectionFailed` on routers and
-`ApplyFailed` on managed objects. The `message` is the last reconcile error.
+`Ready` condition. Failure reasons are `ConnectionFailed` on routers,
+`ApplyFailed` on managed objects, `WaitingForConfirmation` on unconfirmed
+restores, and `RemoteStorageNotImplemented` when reserved remote backup
+storage is enabled. The `message` is the last reconcile error.
 
 ```sh
-kubectl get mikrotikrouters,mikrotikdnsrecords,mikrotikroutes,mikrotikportforwards,mikrotikfirewallrules -A
+kubectl get mikrotikrouters,mikrotikdnsrecords,mikrotikroutes,mikrotikportforwards,mikrotikfirewallrules,mikrotikbackups,mikrotikrestores -A
 kubectl describe mikrotikrouter -n mikrotik-system home-router
 kubectl -n mikrotik-operator-system logs -l app.kubernetes.io/name=mikrotik-operator
 ```
@@ -24,6 +26,24 @@ reconciles RouterOS. Check which replica holds the lease if logs look idle:
 ```sh
 kubectl -n mikrotik-operator-system get lease mikrotik-operator -o yaml
 ```
+
+## Problem: restore stays WaitingForConfirmation
+
+**Symptoms:**
+
+- `MikroTikRestore` `Ready=False`, reason `WaitingForConfirmation`
+
+**Cause:** Restores do not run `/import` until `spec.confirm` is exactly
+`RESTORE`.
+
+**Solution:**
+
+1. Point `spec.backupRef` at a snapshot with `status.export`, not a schedule
+   policy.
+2. Set `spec.confirm: RESTORE` or use **Confirm restore** in the admin UI.
+3. Understand that `/import` replaces the target router configuration.
+
+See [Backup and restore]({% link _guide/backup-restore.md %}).
 
 ## Problem: implicit router selection is invalid
 
@@ -165,7 +185,7 @@ unaffected.
 **Cause:** Chart package version and image tags are independent. An empty
 `image.tag` uses `Chart.yaml` `appVersion`.
 
-**Solution:** Pin `--set image.tag=v0.4.0` (and `ui.image.tag` when the UI is
+**Solution:** Pin `--set image.tag=v0.2.0` (and `ui.image.tag` when the UI is
 enabled), or set `image.digest`. See [Install and configure]({% link _guide/getting-started.md %}).
 
 **Verification:** `kubectl -n mikrotik-operator-system get pods -o jsonpath='{.items[*].spec.containers[*].image}'` shows the pinned tag or digest.

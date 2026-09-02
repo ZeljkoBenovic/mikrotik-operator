@@ -1,4 +1,4 @@
-import { AutoComplete, Button, Checkbox, Col, Form, Input, InputNumber, Radio, Row, Space, Switch } from 'antd'
+import { AutoComplete, Button, Checkbox, Col, Form, Input, InputNumber, Radio, Row, Space, Switch, Typography } from 'antd'
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import {
   NamespacedRefFields,
@@ -366,6 +366,126 @@ export function FirewallRuleForm({ createMode }: FormCommonProps) {
       <Form.Item name={['spec', 'placeBefore']} label="Place before" valuePropName="checked">
         <Switch />
       </Form.Item>
+    </>
+  )
+}
+
+export function BackupForm({ createMode }: FormCommonProps) {
+  const namespace = Form.useWatch('namespace') as string | undefined
+  const mode = Form.useWatch(['spec', 'backupMode']) as string | undefined
+  return (
+    <>
+      <MetaFields createMode={createMode} />
+      <Form.Item
+        name={['spec', 'routerRef']}
+        label="Router"
+        rules={[{ required: true, message: 'Router is required' }]}
+      >
+        <RouterRefSelect namespace={namespace} autoSelect={createMode} />
+      </Form.Item>
+      <Form.Item name={['spec', 'backupMode']} label="Trigger" initialValue="once">
+        <Radio.Group>
+          <Radio.Button value="once">Run once</Radio.Button>
+          <Radio.Button value="schedule">Schedule</Radio.Button>
+        </Radio.Group>
+      </Form.Item>
+      {mode === 'schedule' ? (
+        <>
+          <Form.Item
+            name={['spec', 'schedule']}
+            label="Cron schedule"
+            extra="Five-field cron. The operator creates snapshot children and prunes by retention."
+            rules={[{ required: true, message: 'Schedule is required' }]}
+          >
+            <Input placeholder="0 2 * * *" />
+          </Form.Item>
+          <Form.Item name={['spec', 'retention']} label="Retention" extra="Snapshots kept for this policy.">
+            <InputNumber min={1} max={100} style={{ width: '100%' }} />
+          </Form.Item>
+        </>
+      ) : (
+        <Typography.Paragraph type="secondary">
+          Creating this object captures one RouterOS <code>/export</code> into status. Exports live in
+          etcd and should stay well under 1.5MiB.
+        </Typography.Paragraph>
+      )}
+    </>
+  )
+}
+
+export function RestoreForm({ createMode }: FormCommonProps) {
+  const namespace = Form.useWatch('namespace') as string | undefined
+  const targetType = Form.useWatch(['spec', 'targetType']) as string | undefined
+  return (
+    <>
+      <MetaFields createMode={createMode} />
+      <Form.Item
+        name={['spec', 'backupRef', 'name']}
+        label="Source backup"
+        extra="Name of a MikroTikBackup snapshot in this namespace (or set namespace in YAML)."
+        rules={[{ required: true, message: 'Backup name is required' }]}
+      >
+        <Input placeholder="once" />
+      </Form.Item>
+      <Form.Item name={['spec', 'backupRef', 'namespace']} label="Backup namespace">
+        <Input placeholder="same as this restore" />
+      </Form.Item>
+      <Form.Item name={['spec', 'targetType']} label="Target" initialValue="router">
+        <Radio.Group>
+          <Radio.Button value="router">Existing router CR</Radio.Button>
+          <Radio.Button value="connection">New router (IP + secret)</Radio.Button>
+        </Radio.Group>
+      </Form.Item>
+      {targetType === 'connection' ? (
+        <>
+          <Form.Item
+            name={['spec', 'connection', 'address']}
+            label="Address"
+            rules={[{ required: true, message: 'Address is required' }]}
+          >
+            <Input placeholder="192.168.88.1" />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name={['spec', 'connection', 'port']} label="Port">
+                <InputNumber min={1} max={65535} style={{ width: '100%' }} placeholder="8728 / 8729" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name={['spec', 'connection', 'tls']}
+                label="TLS"
+                valuePropName="checked"
+                initialValue={createMode ? true : undefined}
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item
+            name={['spec', 'connection', 'credentialsSecret', 'name']}
+            label="Credentials secret"
+            extra="Secret in this restore's namespace. Username and password are never displayed."
+            rules={[{ required: true, message: 'Credentials secret is required' }]}
+          >
+            <SecretNameSelect namespace={namespace} />
+          </Form.Item>
+        </>
+      ) : (
+        <Form.Item
+          name={['spec', 'routerRef']}
+          label="Router"
+          rules={[{ required: true, message: 'Router is required' }]}
+        >
+          <RouterRefSelect namespace={namespace} autoSelect={createMode} />
+        </Form.Item>
+      )}
+      <Typography.Paragraph type="warning">
+        Restore does not run until you confirm on the resource page. That step sets{' '}
+        <code>spec.confirm: RESTORE</code> and the operator then runs <code>/import</code>. Import
+        does not wipe the device; it is best used on an empty router. YAML create/edit in this UI
+        cannot set <code>spec.confirm</code> — use the confirm dialog or kubectl.
+      </Typography.Paragraph>
     </>
   )
 }

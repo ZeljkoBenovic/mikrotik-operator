@@ -6,7 +6,7 @@ import type { ResourceObject } from '../api/types'
 import type { KindConfig } from '../kinds'
 import { errorMessage } from '../utils/errors'
 import { kubernetesNameError, sanitizeKubernetesName } from '../utils/k8sName'
-import { isManaged, toSubmitBody } from '../utils/resource'
+import { isManaged, isReadOnly, toSubmitBody } from '../utils/resource'
 import { fromYAML, toYAML } from '../utils/yaml'
 import { YamlEditor } from './YamlEditor'
 import { emptyForm, emptyResource, formFromResource, resourceFromForm } from './forms/convert'
@@ -16,6 +16,8 @@ import {
   PortForwardForm,
   RouteForm,
   RouterForm,
+  BackupForm,
+  RestoreForm,
 } from './forms/KindForms'
 
 type ResourceDrawerProps = {
@@ -42,6 +44,7 @@ export function ResourceDrawer({
   const [yamlText, setYamlText] = useState('')
   const config = useQuery({ queryKey: queryKeys.config, queryFn: api.config })
   const createMode = mode === 'create'
+  const readOnly = Boolean(resource && isReadOnly(resource))
   const owned = Boolean(resource && isManaged(resource))
   const operatorNamespace = config.data || 'default'
   const sessionKey = !open
@@ -129,14 +132,22 @@ export function ResourceDrawer({
         return <PortForwardForm createMode={createMode} />
       case 'MikroTikFirewallRule':
         return <FirewallRuleForm createMode={createMode} />
+      case 'MikroTikBackup':
+        return <BackupForm createMode={createMode} />
+      case 'MikroTikRestore':
+        return <RestoreForm createMode={createMode} />
       default:
         return null
     }
   }
 
   async function submit() {
-    if (owned) {
-      message.warning('Owned resources cannot be edited from this UI.')
+    if (readOnly) {
+      message.warning(
+        owned
+          ? 'Owned resources cannot be edited from this UI.'
+          : 'Applied restores cannot be edited from this UI.',
+      )
       return
     }
     try {
@@ -155,6 +166,9 @@ export function ResourceDrawer({
           parsed.metadata.namespace = operatorNamespace
         } else if (!parsed.metadata.namespace) {
           parsed.metadata.namespace = resource?.metadata.namespace || operatorNamespace
+        }
+        if (kind.apiKind === 'MikroTikRestore' && parsed.spec && typeof parsed.spec === 'object') {
+          delete (parsed.spec as Record<string, unknown>).confirm
         }
         await mutation.mutateAsync(parsed)
         return
@@ -212,7 +226,7 @@ export function ResourceDrawer({
       extra={
         <Space>
           <Typography.Text type="secondary">YAML</Typography.Text>
-          <Switch checked={yamlMode} onChange={toggleYaml} disabled={owned || formLocked} />
+          <Switch checked={yamlMode} onChange={toggleYaml} disabled={readOnly || formLocked} />
         </Space>
       }
       footer={
@@ -222,7 +236,7 @@ export function ResourceDrawer({
             type="primary"
             onClick={() => void submit()}
             loading={mutation.isPending || formLocked}
-            disabled={owned || formLocked}
+            disabled={readOnly || formLocked}
           >
             {mode === 'edit' ? 'Save' : 'Create'}
           </Button>
@@ -233,11 +247,11 @@ export function ResourceDrawer({
         <YamlEditor
           value={yamlText}
           onChange={setYamlText}
-          readOnly={owned || formLocked}
+          readOnly={readOnly || formLocked}
           height="calc(100vh - 220px)"
         />
       ) : (
-        <Form form={form} layout="vertical" requiredMark="optional" disabled={formLocked}>
+        <Form form={form} layout="vertical" requiredMark="optional" disabled={formLocked || readOnly}>
           {kindForm()}
         </Form>
       )}
