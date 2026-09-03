@@ -11,7 +11,17 @@ import {
 } from '../../utils/k8sName'
 import { liveRouterRefOptions } from './routerRef'
 
-export function SecretNameSelect({ namespace, disabled }: { namespace?: string; disabled?: boolean }) {
+export function SecretNameSelect({
+  namespace,
+  disabled,
+  value,
+  onChange,
+}: {
+  namespace?: string
+  disabled?: boolean
+  value?: string
+  onChange?: (value: string) => void
+}) {
   const query = useQuery({
     queryKey: queryKeys.secrets(namespace ?? ''),
     queryFn: () => api.secrets(namespace ?? ''),
@@ -22,6 +32,8 @@ export function SecretNameSelect({ namespace, disabled }: { namespace?: string; 
       allowClear
       disabled={disabled || !namespace}
       options={(query.data ?? []).map((name) => ({ value: name }))}
+      value={value}
+      onChange={onChange}
       placeholder={namespace ? 'Secret name' : 'Waiting for operator namespace'}
       filterOption={(input, option) =>
         (option?.value ?? '').toLowerCase().includes(input.toLowerCase())

@@ -103,6 +103,44 @@ function yamlSwitch() {
 }
 
 describe('ResourceDrawer', () => {
+  it('stores the selected router credentials secret in the form', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/config') {
+        return jsonResponse({ namespace: 'mikrotik-operator-system' })
+      }
+      if (url === '/api/secrets/mikrotik-operator-system') {
+        return jsonResponse({ items: ['router-local'] })
+      }
+      if (init?.method === 'POST') {
+        return jsonResponse(JSON.parse(String(init.body ?? '{}')))
+      }
+      return jsonResponse({ items: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    renderWithProviders(<ResourceDrawer kind={routerKind} open mode="create" onClose={() => {}} />)
+
+    const name = await screen.findByLabelText(/^name$/i)
+    await waitFor(() => expect(name).toBeEnabled())
+    await user.type(name, 'edge')
+    await user.type(screen.getByLabelText(/^address$/i), '10.0.20.254')
+    const credentials = screen.getByRole('combobox')
+    await user.click(credentials)
+    await user.click(await screen.findByText('router-local', { selector: '.ant-select-item-option-content' }))
+    await user.click(screen.getByRole('button', { name: /create/i }))
+
+    await waitFor(() => {
+      const createCall = fetchMock.mock.calls.find(
+        ([url, request]) => String(url).includes('/api/resources/mikrotikrouters/') && request?.method === 'POST',
+      )
+      expect(createCall).toBeTruthy()
+      const body = JSON.parse(String(createCall?.[1]?.body))
+      expect(body.spec.credentialsSecret).toEqual({ name: 'router-local' })
+    })
+    expect(screen.queryByText('Credentials secret is required')).not.toBeInTheDocument()
+  })
+
   it('creates resources in the operator namespace without a namespace picker', async () => {
     stubFetch()
     renderWithProviders(<ResourceDrawer kind={routerKind} open mode="create" onClose={() => {}} />)
