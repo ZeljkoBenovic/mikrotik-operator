@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -248,13 +249,39 @@ func cleanupRouterTargets(
 			return nil
 		})
 		if err != nil {
-			if apierrors.IsNotFound(err) {
+			if ignoreMissingRouter(err) == nil {
 				continue
 			}
 			return err
 		}
 	}
 	return nil
+}
+
+// ignoreMissingRouter returns nil when the MikroTikRouter object itself is gone.
+// Other NotFound errors, including a missing credentials Secret, must keep the
+// managed-config finalizer so RouterOS entries are not orphaned.
+func ignoreMissingRouter(err error) error {
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+	var status apierrors.APIStatus
+	if !errors.As(err, &status) {
+		return err
+	}
+	details := status.Status().Details
+	if details == nil {
+		return err
+	}
+	switch details.Kind {
+	case "mikrotikrouters", "MikroTikRouter":
+		return nil
+	default:
+		return err
+	}
 }
 
 func routerEndpoints(router api.MikroTikRouter) []api.RouterEndpoint {

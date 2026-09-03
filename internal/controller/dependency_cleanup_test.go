@@ -3,7 +3,9 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
 	ros "github.com/ZeljkoBenovic/mikrotik-operator/internal/routeros"
@@ -46,6 +48,116 @@ func TestDNSNonAddressableServiceCleansEveryDurableRouter(t *testing.T) {
 		if routerClient.deletedDNS == 0 {
 			t.Fatalf("%s was not fully cleaned: DNS=%d", name, routerClient.deletedDNS)
 		}
+	}
+}
+
+func TestDNSReconcilerKeepsFinalizerWhenCredentialsSecretIsMissing(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	now := metav1.NewTime(time.Now())
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "dns",
+			Namespace:         "app",
+			Finalizers:        []string{resourceFinalizer},
+			DeletionTimestamp: &now,
+			Annotations:       map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec:   api.MikroTikDNSRecordSpec{RouterRef: router.Name, Name: "app.example.com", Address: "10.0.0.8"},
+		Status: api.MikroTikDNSRecordStatus{RouterRef: router.Name, Applied: true},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &record).
+		WithStatusSubresource(&router, &record).
+		Build()
+	reconciler := DNSReconciler{Client: kube, Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+		return routerClient, nil
+	}}
+	_, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name))
+	if err == nil {
+		t.Fatal("expected credentials secret not found to block deletion cleanup")
+	}
+	if !apierrors.IsNotFound(err) && !strings.Contains(err.Error(), "credentials") {
+		t.Fatalf("error = %v, want a missing credentials secret", err)
+	}
+	if routerClient.deletedDNS != 0 {
+		t.Fatalf("missing secret still deleted RouterOS DNS: %d", routerClient.deletedDNS)
+	}
+	var stored api.MikroTikDNSRecord
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
+		t.Fatal("missing credentials secret dropped the managed-config finalizer")
+	}
+}
+
+func TestPortForwardReconcilerKeepsFinalizerWhenCredentialsSecretIsMissing(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	now := metav1.NewTime(time.Now())
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "web",
+			Namespace:         "app",
+			Finalizers:        []string{resourceFinalizer},
+			DeletionTimestamp: &now,
+			Annotations:       map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			RouterRef:     router.Name,
+			Protocol:      "tcp",
+			ExternalPort:  80,
+			TargetPort:    8080,
+			TargetAddress: "10.0.0.20",
+		},
+		Status: api.MikroTikPortForwardStatus{RouterRef: router.Name, Applied: true},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &forward).
+		WithStatusSubresource(&router, &forward).
+		Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+		return routerClient, nil
+	}}
+	_, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name))
+	if err == nil {
+		t.Fatal("expected credentials secret not found to block deletion cleanup")
+	}
+	if !apierrors.IsNotFound(err) && !strings.Contains(err.Error(), "credentials") {
+		t.Fatalf("error = %v, want a missing credentials secret", err)
+	}
+	if routerClient.deletedForwards != 0 || routerClient.deletedFirewall != 0 {
+		t.Fatalf("missing secret still deleted RouterOS NAT/firewall: forwards=%d firewall=%d", routerClient.deletedForwards, routerClient.deletedFirewall)
+	}
+	var stored api.MikroTikPortForward
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: forward.Namespace, Name: forward.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
+		t.Fatal("missing credentials secret dropped the managed-config finalizer")
 	}
 }
 

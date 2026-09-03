@@ -493,10 +493,7 @@ func (d *DNSReconciler) cleanupConfiguration(ctx context.Context, o *api.MikroTi
 		}
 		return nil
 	})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	return err
+	return ignoreMissingRouter(err)
 }
 func (d *DNSReconciler) status(ctx context.Context, o *api.MikroTikDNSRecord, err error) (reconcile.Result, error) {
 	oldStatus := o.Status
@@ -3057,10 +3054,7 @@ func (p *PortForwardReconciler) cleanupConfiguration(ctx context.Context, o *api
 		}
 		return nil
 	})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	return err
+	return ignoreMissingRouter(err)
 }
 
 func (p *PortForwardReconciler) cleanupAllConfiguration(ctx context.Context, o *api.MikroTikPortForward) error {

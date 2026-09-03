@@ -12,6 +12,12 @@ and the project follows semantic versioning.
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
   Operator `appVersion` remains `v0.4.0`.
 
+### Fixed
+
+- Child-CR deletion no longer treats a missing credentials Secret as successful
+  RouterOS cleanup. DNS, route, port-forward, and firewall finalizers stay until
+  the router is gone or credentials can be used to delete managed entries.
+
 ### Tests
 
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
