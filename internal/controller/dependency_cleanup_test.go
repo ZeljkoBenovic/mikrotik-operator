@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
 	ros "github.com/ZeljkoBenovic/mikrotik-operator/internal/routeros"
@@ -19,6 +20,74 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
+
+func TestDNSReconcilerDeletesRouterOSOnDeletion(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	now := metav1.NewTime(time.Now())
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "dns",
+			Namespace:         "app",
+			Finalizers:        []string{resourceFinalizer},
+			DeletionTimestamp: &now,
+			Annotations:       map[string]string{durableRouterTargetsAnnotation: "router-a,router-b"},
+		},
+		Spec:   api.MikroTikDNSRecordSpec{Name: "service.example.com", Address: "10.0.0.8", RouterRef: "router-b"},
+		Status: api.MikroTikDNSRecordStatus{RouterRef: "router-b", Applied: true},
+	}
+	objects = append(objects, &record)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&record).Build()
+	reconciler := DNSReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
+		t.Fatal(err)
+	}
+	for name, routerClient := range clients {
+		if routerClient.deletedDNS == 0 {
+			t.Fatalf("%s was not cleaned: DNS=%d", name, routerClient.deletedDNS)
+		}
+	}
+	var stored api.MikroTikDNSRecord
+	err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored)
+	if err == nil && controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
+		t.Fatal("deletion left the managed-config finalizer")
+	}
+	if err != nil && !apierrors.IsNotFound(err) {
+		t.Fatal(err)
+	}
+}
+
+func TestDNSReconcilerCleansDurableTargetWhenRouterSelectionIsAmbiguous(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "dns",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a"},
+		},
+		Spec:   api.MikroTikDNSRecordSpec{Name: "service.example.com", Address: "10.0.0.8"},
+		Status: api.MikroTikDNSRecordStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &record)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&record).Build()
+	reconciler := DNSReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if clients["router-a"].deletedDNS == 0 {
+		t.Fatal("ambiguous implicit router selection did not delete the previous DNS record")
+	}
+	if clients["router-b"].deletedDNS != 0 {
+		t.Fatal("ambiguous selection cleaned a router that was not in durable history")
+	}
+	var stored api.MikroTikDNSRecord
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[durableRouterTargetsAnnotation] != "" {
+		t.Fatalf("durable router annotation = %q, want cleared", stored.Annotations[durableRouterTargetsAnnotation])
+	}
+}
 
 func TestDNSNonAddressableServiceCleansEveryDurableRouter(t *testing.T) {
 	scheme, objects, factory, clients := externalCleanupFixture(t)

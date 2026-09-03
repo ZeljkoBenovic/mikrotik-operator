@@ -156,3 +156,67 @@ func TestRouteReconcilerDeletesRouterOSOnDeletion(t *testing.T) {
 		t.Fatal("deletion left the managed-config finalizer")
 	}
 }
+
+func TestRouteReconcilerPersistsStatusRouterWhenSelectionIsAmbiguous(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	route := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "web",
+			Namespace:  "app",
+			Finalizers: []string{resourceFinalizer},
+		},
+		Spec:   api.MikroTikRouteSpec{Destination: "10.0.0.8/32", Gateway: "192.0.2.1"},
+		Status: api.MikroTikRouteStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &route)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&route).Build()
+	reconciler := RouteReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(route.Namespace, route.Name)); err != nil {
+		t.Fatal(err)
+	}
+	for name, routerClient := range clients {
+		if len(routerClient.deletedRouteComments) != 0 {
+			t.Fatalf("%s was cleaned before the durable target was recorded: %#v", name, routerClient.deletedRouteComments)
+		}
+	}
+	var stored api.MikroTikRoute
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: route.Namespace, Name: route.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[durableRouterTargetsAnnotation] != "router-a" {
+		t.Fatalf("durable router annotation = %q, want router-a", stored.Annotations[durableRouterTargetsAnnotation])
+	}
+}
+
+func TestRouteReconcilerCleansDurableTargetWhenRouterSelectionIsAmbiguous(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	route := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a"},
+		},
+		Spec:   api.MikroTikRouteSpec{Destination: "10.0.0.8/32", Gateway: "192.0.2.1"},
+		Status: api.MikroTikRouteStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &route)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&route).Build()
+	reconciler := RouteReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(route.Namespace, route.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if len(clients["router-a"].deletedRouteComments) == 0 {
+		t.Fatal("ambiguous implicit router selection did not delete the previous route")
+	}
+	if len(clients["router-b"].deletedRouteComments) != 0 {
+		t.Fatal("ambiguous selection cleaned a router that was not in durable history")
+	}
+	var stored api.MikroTikRoute
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: route.Namespace, Name: route.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[durableRouterTargetsAnnotation] != "" {
+		t.Fatalf("durable router annotation = %q, want cleared", stored.Annotations[durableRouterTargetsAnnotation])
+	}
+}
