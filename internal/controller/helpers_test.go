@@ -513,3 +513,18 @@ func TestPortForwardDestinationAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestIgnoreMissingRouterDistinguishesSecretFromRouter(t *testing.T) {
+	t.Parallel()
+	routerErr := apierrors.NewNotFound(api.GroupVersion.WithResource("mikrotikrouters").GroupResource(), "edge")
+	secretErr := apierrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "credentials")
+	if err := ignoreMissingRouter(routerErr); err != nil {
+		t.Fatalf("router not found = %v, want nil", err)
+	}
+	if err := ignoreMissingRouter(secretErr); err == nil {
+		t.Fatal("secret not found was treated as a missing router")
+	}
+	if err := ignoreMissingRouter(errors.New("dial timeout")); err == nil {
+		t.Fatal("non-NotFound error was ignored")
+	}
+}

@@ -9,6 +9,7 @@ import (
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
 	ros "github.com/ZeljkoBenovic/mikrotik-operator/internal/routeros"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -154,5 +155,97 @@ func TestRouteReconcilerDeletesRouterOSOnDeletion(t *testing.T) {
 	err := kube.Get(context.Background(), types.NamespacedName{Namespace: route.Namespace, Name: route.Name}, &stored)
 	if err == nil && controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
 		t.Fatal("deletion left the managed-config finalizer")
+	}
+}
+
+func TestRouteReconcilerKeepsFinalizerWhenCredentialsSecretIsMissing(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	now := metav1.NewTime(time.Now())
+	route := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "web",
+			Namespace:         "app",
+			Finalizers:        []string{resourceFinalizer},
+			DeletionTimestamp: &now,
+			Annotations:       map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec:   api.MikroTikRouteSpec{Destination: "10.0.0.8/32", Gateway: "192.0.2.1", RouterRef: router.Name},
+		Status: api.MikroTikRouteStatus{RouterRef: router.Name, Applied: true},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &route).
+		WithStatusSubresource(&router, &route).
+		Build()
+	reconciler := RouteReconciler{Client: kube, Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+		return routerClient, nil
+	}}
+	_, err := reconciler.Reconcile(context.Background(), reconcileRequest(route.Namespace, route.Name))
+	if err == nil {
+		t.Fatal("expected credentials secret not found to block deletion cleanup")
+	}
+	if !apierrors.IsNotFound(err) && !strings.Contains(err.Error(), "credentials") {
+		t.Fatalf("error = %v, want a missing credentials secret", err)
+	}
+	if len(routerClient.deletedRouteComments) != 0 {
+		t.Fatalf("missing secret still deleted RouterOS routes: %#v", routerClient.deletedRouteComments)
+	}
+	var stored api.MikroTikRoute
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: route.Namespace, Name: route.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
+		t.Fatal("missing credentials secret dropped the managed-config finalizer")
+	}
+}
+
+func TestRouteReconcilerRemovesFinalizerWhenRouterIsGone(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	now := metav1.NewTime(time.Now())
+	route := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "web",
+			Namespace:         "app",
+			Finalizers:        []string{resourceFinalizer},
+			DeletionTimestamp: &now,
+			Annotations:       map[string]string{durableRouterTargetsAnnotation: "router"},
+		},
+		Spec:   api.MikroTikRouteSpec{Destination: "10.0.0.8/32", Gateway: "192.0.2.1", RouterRef: "router"},
+		Status: api.MikroTikRouteStatus{RouterRef: "router", Applied: true},
+	}
+	dials := 0
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&route).
+		WithStatusSubresource(&route).
+		Build()
+	reconciler := RouteReconciler{
+		Client: kube,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			dials++
+			return &recordingRouterClient{}, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(route.Namespace, route.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if dials != 0 {
+		t.Fatalf("missing router dialed RouterOS %d times", dials)
+	}
+	var stored api.MikroTikRoute
+	err := kube.Get(context.Background(), types.NamespacedName{Namespace: route.Namespace, Name: route.Name}, &stored)
+	if err == nil && controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
+		t.Fatal("missing router left the managed-config finalizer")
 	}
 }
