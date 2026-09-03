@@ -18,6 +18,10 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover leftover DNS, route, and port-forward cleanup when implicit router
+  selection becomes ambiguous, port-forward and DNS deletion sweeps, and
+  `/export` `/import` fallback, empty-export, unterminated-script, and leftover
+  restore-file cleanup paths.
 
 ## [0.4.0] - 2026-09-01
 
