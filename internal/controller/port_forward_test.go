@@ -4,10 +4,12 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
 	ros "github.com/ZeljkoBenovic/mikrotik-operator/internal/routeros"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -271,5 +273,121 @@ func TestReconcileServicePortForwardsUpdatesDestinationAddress(t *testing.T) {
 	}
 	if stored.Spec.DestinationAddress != "198.51.100.10" {
 		t.Fatalf("updated spec.destinationAddress = %q, want 198.51.100.10", stored.Spec.DestinationAddress)
+	}
+}
+
+func TestPortForwardReconcilerDeletesRouterOSOnDeletion(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	now := metav1.NewTime(time.Now())
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "web",
+			Namespace:         "app",
+			Finalizers:        []string{resourceFinalizer},
+			DeletionTimestamp: &now,
+			Annotations:       map[string]string{durableRouterTargetsAnnotation: "router-a,router-b"},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			Protocol:      "tcp",
+			ExternalPort:  80,
+			TargetPort:    80,
+			TargetAddress: "10.0.0.20",
+			RouterRef:     "router-b",
+		},
+		Status: api.MikroTikPortForwardStatus{RouterRef: "router-b", Applied: true},
+	}
+	objects = append(objects, &forward)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&forward).Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name)); err != nil {
+		t.Fatal(err)
+	}
+	for name, routerClient := range clients {
+		if routerClient.deletedForwards == 0 || routerClient.deletedFirewall == 0 {
+			t.Fatalf("%s was not fully cleaned: forwards=%d firewall=%d", name, routerClient.deletedForwards, routerClient.deletedFirewall)
+		}
+	}
+	var stored api.MikroTikPortForward
+	err := kube.Get(context.Background(), types.NamespacedName{Namespace: forward.Namespace, Name: forward.Name}, &stored)
+	if err == nil && controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
+		t.Fatal("deletion left the managed-config finalizer")
+	}
+	if err != nil && !apierrors.IsNotFound(err) {
+		t.Fatal(err)
+	}
+}
+
+func TestPortForwardReconcilerPersistsStatusRouterWhenSelectionIsAmbiguous(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "web",
+			Namespace:  "app",
+			Finalizers: []string{resourceFinalizer},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			Protocol:      "tcp",
+			ExternalPort:  80,
+			TargetPort:    80,
+			TargetAddress: "10.0.0.20",
+		},
+		Status: api.MikroTikPortForwardStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &forward)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&forward).Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name)); err != nil {
+		t.Fatal(err)
+	}
+	for name, routerClient := range clients {
+		if routerClient.deletedForwards != 0 || routerClient.deletedFirewall != 0 {
+			t.Fatalf("%s was cleaned before the durable target was recorded: forwards=%d firewall=%d", name, routerClient.deletedForwards, routerClient.deletedFirewall)
+		}
+	}
+	var stored api.MikroTikPortForward
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: forward.Namespace, Name: forward.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[durableRouterTargetsAnnotation] != "router-a" {
+		t.Fatalf("durable router annotation = %q, want router-a", stored.Annotations[durableRouterTargetsAnnotation])
+	}
+}
+
+func TestPortForwardReconcilerCleansDurableTargetWhenRouterSelectionIsAmbiguous(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a"},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			Protocol:      "tcp",
+			ExternalPort:  80,
+			TargetPort:    80,
+			TargetAddress: "10.0.0.20",
+		},
+		Status: api.MikroTikPortForwardStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &forward)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&forward).Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if clients["router-a"].deletedForwards == 0 || clients["router-a"].deletedFirewall == 0 {
+		t.Fatalf("ambiguous implicit router selection did not delete previous NAT/firewall: forwards=%d firewall=%d",
+			clients["router-a"].deletedForwards, clients["router-a"].deletedFirewall)
+	}
+	if clients["router-b"].deletedForwards != 0 || clients["router-b"].deletedFirewall != 0 {
+		t.Fatal("ambiguous selection cleaned a router that was not in durable history")
+	}
+	var stored api.MikroTikPortForward
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: forward.Namespace, Name: forward.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[durableRouterTargetsAnnotation] != "" {
+		t.Fatalf("durable router annotation = %q, want cleared", stored.Annotations[durableRouterTargetsAnnotation])
 	}
 }
