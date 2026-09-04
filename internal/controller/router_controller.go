@@ -646,14 +646,33 @@ func serviceAddress(ctx context.Context, kube client.Client, service corev1.Serv
 	if err := kube.List(ctx, &nodes); err != nil {
 		return "", err
 	}
-	for _, node := range nodes.Items {
-		for _, nodeAddress := range node.Status.Addresses {
-			if nodeAddress.Type == corev1.NodeInternalIP && nodeAddress.Address != "" {
-				return nodeAddress.Address, nil
+	addresses := nodeInternalIPs(nodes.Items)
+	if len(addresses) == 0 {
+		return "", fmt.Errorf("%w: no node InternalIP found for NodePort service %s/%s", errServiceNotAddressable, service.Namespace, service.Name)
+	}
+	return addresses[0], nil
+}
+
+// nodeInternalIPs returns unique node InternalIPs in stable sort order so
+// NodePort NAT/DNS and single-node routes do not flap when List order changes.
+func nodeInternalIPs(nodes []corev1.Node) []string {
+	addresses := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		for _, address := range node.Status.Addresses {
+			if address.Type == corev1.NodeInternalIP && address.Address != "" {
+				addresses = append(addresses, address.Address)
+				break
 			}
 		}
 	}
-	return "", fmt.Errorf("%w: no node InternalIP found for NodePort service %s/%s", errServiceNotAddressable, service.Namespace, service.Name)
+	sort.Strings(addresses)
+	unique := addresses[:0]
+	for _, address := range addresses {
+		if len(unique) == 0 || unique[len(unique)-1] != address {
+			unique = append(unique, address)
+		}
+	}
+	return unique
 }
 
 type ServiceDNSReconciler struct {
@@ -2361,11 +2380,12 @@ func preparePortForwardReconcileRequest(ctx context.Context, request portForward
 		if selectedPorts {
 			ports = selected
 		}
+		// Leave NodePort targetAddress empty so PortForwardReconciler resolves
+		// the live node InternalIP on each drift check. Baking the IP into spec
+		// made NAT flap when List order changed and stay stale after node replacement.
 		targetAddress := ""
 		if service.Spec.Type == corev1.ServiceTypeNodePort {
-			var err error
-			targetAddress, err = serviceAddress(ctx, request.kube, service)
-			if err != nil {
+			if _, err := serviceAddress(ctx, request.kube, service); err != nil {
 				return request, err
 			}
 		}
@@ -2547,27 +2567,12 @@ func routeGateways(ctx context.Context, kube client.Client, service corev1.Servi
 	if err := kube.List(ctx, &nodes); err != nil {
 		return nil, err
 	}
-	gateways := make([]string, 0, len(nodes.Items))
-	for _, node := range nodes.Items {
-		for _, address := range node.Status.Addresses {
-			if address.Type == corev1.NodeInternalIP && address.Address != "" {
-				gateways = append(gateways, address.Address)
-				break
-			}
-		}
-		if service.Annotations[api.RouteModeAnnotation] == "single-node" && len(gateways) > 0 {
-			break
-		}
-	}
-	sort.Strings(gateways)
-	unique := gateways[:0]
-	for _, gateway := range gateways {
-		if len(unique) == 0 || unique[len(unique)-1] != gateway {
-			unique = append(unique, gateway)
-		}
-	}
+	unique := nodeInternalIPs(nodes.Items)
 	if len(unique) == 0 {
 		return nil, fmt.Errorf("no node InternalIP found for service %s/%s", service.Namespace, service.Name)
+	}
+	if service.Annotations[api.RouteModeAnnotation] == "single-node" {
+		return unique[:1], nil
 	}
 	return unique, nil
 }

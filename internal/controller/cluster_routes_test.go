@@ -211,6 +211,36 @@ func TestClusterRouteGateways(t *testing.T) {
 	}
 }
 
+func TestRouteGatewaysSingleNodeIsStableAcrossListOrder(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "backend",
+			Namespace:   "app",
+			Annotations: map[string]string{api.RouteModeAnnotation: "single-node"},
+		},
+		Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8"},
+	}
+	nodeHigh := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-z"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.20"}}},
+	}
+	nodeLow := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	for _, objects := range [][]client.Object{{&nodeHigh, &nodeLow}, {&nodeLow, &nodeHigh}} {
+		kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+		got, err := routeGateways(context.Background(), kube, service)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0] != "192.0.2.10" {
+			t.Fatalf("single-node gateways = %#v, want [192.0.2.10]", got)
+		}
+	}
+}
+
 func TestClusterRouteHopsMergeSharedOverrideAndNodeOrigin(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	service := corev1.Service{

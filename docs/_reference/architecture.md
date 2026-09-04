@@ -76,7 +76,7 @@ All endpoints in one `MikroTikRouter` definition receive the desired state.
 For ClusterIP Services, routes use node InternalIP addresses unless
 `spec.routeGateway` or a per-endpoint `routeGateway` overrides them. The
 default multi-node behavior provides multiple gateways;
-`mikrotik.operator.io/route-mode: single-node` selects one InternalIP.
+`mikrotik.operator.io/route-mode: single-node` selects the lowest InternalIP.
 
 ## Security boundary
 
