@@ -209,3 +209,34 @@ func TestFirewallRuleReconcilerCleansDurableTargetWhenRouterSelectionIsAmbiguous
 		t.Fatalf("durable router annotation = %q, want cleared", stored.Annotations[durableRouterTargetsAnnotation])
 	}
 }
+
+func TestFirewallRuleReconcilerPersistsStatusRouterWhenSelectionIsAmbiguous(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	rule := api.MikroTikFirewallRule{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "web-allow",
+			Namespace:  "app",
+			Finalizers: []string{resourceFinalizer},
+		},
+		Spec:   api.MikroTikFirewallRuleSpec{Chain: "input", Action: "drop"},
+		Status: api.MikroTikFirewallRuleStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &rule)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&rule).Build()
+	reconciler := FirewallRuleReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(rule.Namespace, rule.Name)); err != nil {
+		t.Fatal(err)
+	}
+	for name, routerClient := range clients {
+		if routerClient.deletedFirewall != 0 {
+			t.Fatalf("%s was cleaned before the durable target was recorded: firewall=%d", name, routerClient.deletedFirewall)
+		}
+	}
+	var stored api.MikroTikFirewallRule
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: rule.Namespace, Name: rule.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[durableRouterTargetsAnnotation] != "router-a" {
+		t.Fatalf("durable router annotation = %q, want router-a", stored.Annotations[durableRouterTargetsAnnotation])
+	}
+}

@@ -147,6 +147,90 @@ func TestExport_V6OmitsShowSensitive(t *testing.T) {
 	}
 }
 
+func TestExport_VersionProbeFailureOmitsShowSensitive(t *testing.T) {
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{err: errors.New("version print failed")},
+			{reply: &routeros.Reply{Done: &proto.Sentence{Map: map[string]string{"ret": "/user\n"}}}},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	if _, err := api.Export(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !sameArgs(scripted.calls[1], []string{"/export", "=compact="}) {
+		t.Fatalf("export args after version failure = %#v", scripted.calls[1])
+	}
+}
+
+func TestExport_ReadsVersionFromDoneSentence(t *testing.T) {
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: &routeros.Reply{Done: &proto.Sentence{Map: map[string]string{"version": "7.16.2"}}}},
+			{reply: &routeros.Reply{Done: &proto.Sentence{Map: map[string]string{"ret": "/user\n"}}}},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	if _, err := api.Export(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/export", "=compact=", "=show-sensitive="}
+	if !sameArgs(scripted.calls[1], want) {
+		t.Fatalf("v7 export args from Done version = %#v, want %#v", scripted.calls[1], want)
+	}
+}
+
+func TestExport_FallsBackWhenCompactFails(t *testing.T) {
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			versionReply("6.49.18"),
+			{err: errors.New("compact unsupported")},
+			{reply: &routeros.Reply{Done: &proto.Sentence{Map: map[string]string{"ret": "/ip dns\n"}}}},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	got, err := api.Export(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(got) != "/ip dns" {
+		t.Fatalf("export = %q", got)
+	}
+	if !sameArgs(scripted.calls[2], []string{"/export"}) {
+		t.Fatalf("fallback args = %#v", scripted.calls[2])
+	}
+}
+
+func TestExport_ReturnsErrorWhenEmpty(t *testing.T) {
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			versionReply("6.49.18"),
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	_, err := api.Export(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "empty export") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestExport_ReturnsLastErrorWhenBothAttemptsFail(t *testing.T) {
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			versionReply("6.49.18"),
+			{err: errors.New("compact failed")},
+			{err: errors.New("verbose failed")},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	_, err := api.Export(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "verbose failed") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestSplitRestoreScript_KeepsChunksUnderV6ContentsLimit(t *testing.T) {
 	t.Parallel()
 	script := largeRestoreScript(200)
@@ -206,6 +290,41 @@ func TestRestoreStatements_JoinsBackslashContinuation(t *testing.T) {
 	}
 	if !strings.Contains(got[1], "comment=\"allow admin\"") || strings.HasSuffix(strings.TrimSpace(got[1]), "\\") {
 		t.Fatalf("continuation not joined: %#v", got[1])
+	}
+}
+
+func TestRestoreStatements_JoinsBraceBlocks(t *testing.T) {
+	t.Parallel()
+	script := "/system script\nadd name=op source={\n:put \"hi\"\n}\n/ip dns set servers=1.1.1.1\n"
+	got, err := restoreStatements(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("statements = %#v", got)
+	}
+	if !strings.Contains(got[1], `:put "hi"`) || !strings.Contains(got[1], "}") {
+		t.Fatalf("brace block not joined: %#v", got[1])
+	}
+}
+
+func TestRestoreStatements_RejectsUnterminatedQuoteAndBrace(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		script string
+	}{
+		{name: "quote", script: "/ip firewall filter\nadd comment=\"unterminated\n"},
+		{name: "brace", script: "/system script\nadd source={\n:put hi\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := restoreStatements(tt.script)
+			if err == nil || !strings.Contains(err.Error(), "unterminated") {
+				t.Fatalf("error = %v", err)
+			}
+		})
 	}
 }
 
@@ -427,6 +546,88 @@ func TestImport_DoesNotFallBackToSystemScript(t *testing.T) {
 			t.Fatalf("system script used after file failure: %#v", scripted.calls)
 		}
 	}
+}
+
+func TestImport_WriteErrorStillRemovesRestoreFile(t *testing.T) {
+	empty := &routeros.Reply{}
+	created := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{".id": "*9", "name": restoreFileName},
+	}}}
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty},
+			{reply: empty},
+			{reply: created},
+			{err: errors.New("contents too large")},
+			{reply: created},
+			{reply: empty},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	err := api.Import(context.Background(), "/ip dns set servers=1.1.1.1\n")
+	if err == nil || !strings.Contains(err.Error(), "contents too large") {
+		t.Fatalf("error = %v", err)
+	}
+	if !sawCommand(scripted.calls, "/file/remove") {
+		t.Fatalf("write failure left restore file: %#v", scripted.calls)
+	}
+}
+
+func TestImport_ImportErrorStillRemovesRestoreFile(t *testing.T) {
+	empty := &routeros.Reply{}
+	created := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{".id": "*9", "name": restoreFileName},
+	}}}
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty},
+			{reply: empty},
+			{reply: created},
+			{reply: empty},
+			{err: errors.New("syntax error")},
+			{reply: created},
+			{reply: empty},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	err := api.Import(context.Background(), "/ip dns set servers=1.1.1.1\n")
+	if err == nil || !strings.Contains(err.Error(), "syntax error") {
+		t.Fatalf("error = %v", err)
+	}
+	if !sawCommand(scripted.calls, "/file/remove") {
+		t.Fatalf("import failure left restore file: %#v", scripted.calls)
+	}
+}
+
+func TestImport_JoinsRemoveErrorAfterImportFailure(t *testing.T) {
+	empty := &routeros.Reply{}
+	created := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{".id": "*9", "name": restoreFileName},
+	}}}
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty},
+			{reply: empty},
+			{reply: created},
+			{reply: empty},
+			{err: errors.New("syntax error")},
+			{err: errors.New("remove print failed")},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	err := api.Import(context.Background(), "/ip dns set servers=1.1.1.1\n")
+	if err == nil || !strings.Contains(err.Error(), "syntax error") || !strings.Contains(err.Error(), "remove print failed") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func sawCommand(calls [][]string, command string) bool {
+	for _, call := range calls {
+		if len(call) > 0 && call[0] == command {
+			return true
+		}
+	}
+	return false
 }
 
 func sameArgs(got, want []string) bool {
