@@ -12,11 +12,9 @@ import (
 	"github.com/go-routeros/routeros/v3"
 )
 
-// skipFlakyNodePortNAT disables NodePort NAT and forward-filter checks. The
-// operator selects the first node InternalIP from an unsorted List, so the
-// generated port-forward can flip between k3d nodes and delete/recreate
-// RouterOS NAT after Kubernetes status.applied=true.
-var skipFlakyNodePortNAT = true
+// skipFlakyNodePortNAT disables NodePort NAT and forward-filter checks.
+// Keep false: node InternalIP selection is now a stable sorted list.
+var skipFlakyNodePortNAT = false
 
 type entry map[string]string
 
@@ -127,10 +125,7 @@ func run() (err error) {
 		return err
 	}
 	if skipFlakyNodePortNAT {
-		// NodePort dst-nat/src-nat flaps in CI: serviceAddress returns the first
-		// node InternalIP from an unsorted List, so the generated port-forward can
-		// flip between nodes and delete/recreate NAT after status.applied=true.
-		fmt.Printf("skipping flaky NodePort NAT check for public 198.51.100.11 to one of %s:%s\n", strings.Join(nodeIPs, ", "), nodePortValue)
+		fmt.Printf("skipping NodePort NAT check for public 198.51.100.11 to one of %s:%s\n", strings.Join(nodeIPs, ", "), nodePortValue)
 	} else if err := assertNATOneOf(nat, "198.51.100.11", nodeIPs, "80", nodePortValue); err != nil {
 		return err
 	}

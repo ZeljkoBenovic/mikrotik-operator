@@ -46,8 +46,9 @@ metadata:
     mikrotik.operator.io/public-ip: 203.0.113.10
 ```
 
-For a NodePort Service, the generated DNS and NAT configuration targets a node
-InternalIP and the allocated NodePort. The ClusterIP route is not created.
+For a NodePort Service, the generated DNS and NAT configuration targets a
+stable node InternalIP (the lowest address) and the allocated NodePort. The
+ClusterIP route is not created.
 
 ## Expose an Ingress
 

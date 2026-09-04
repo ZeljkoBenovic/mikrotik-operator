@@ -461,6 +461,40 @@ func TestServiceAddress(t *testing.T) {
 	}
 }
 
+func TestServiceAddressSelectsStableNodeInternalIP(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	nodeHigh := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-z"},
+		Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
+			{Type: corev1.NodeInternalIP, Address: "192.0.2.20"},
+		}},
+	}
+	nodeLow := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
+			{Type: corev1.NodeInternalIP, Address: "192.0.2.10"},
+		}},
+	}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeNodePort, ClusterIP: "10.0.0.8"},
+	}
+	orders := [][]client.Object{
+		{&nodeHigh, &nodeLow},
+		{&nodeLow, &nodeHigh},
+	}
+	for _, objects := range orders {
+		kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+		got, err := serviceAddress(context.Background(), kube, service)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "192.0.2.10" {
+			t.Fatalf("serviceAddress() = %q, want lowest InternalIP 192.0.2.10", got)
+		}
+	}
+}
+
 func TestServiceAddressRejectsNodePortWithoutInternalIP(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	kube := fake.NewClientBuilder().WithScheme(scheme).Build()

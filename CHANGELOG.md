@@ -12,6 +12,13 @@ and the project follows semantic versioning.
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
   Operator `appVersion` remains `v0.4.0`.
 
+### Fixed
+
+- Select NodePort NAT/DNS targets and single-node route gateways from a
+  stably sorted node InternalIP list, and stop baking that address into
+  generated `MikroTikPortForward` specs. Unsorted `Node` lists previously
+  flipped dst-nat/src-nat every drift check on multi-node clusters.
+
 ### Tests
 
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
