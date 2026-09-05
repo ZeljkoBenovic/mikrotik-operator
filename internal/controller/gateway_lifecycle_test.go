@@ -189,6 +189,130 @@ func TestAcceptedListenerHostnamesHonorsParentPortAndUnionsListeners(t *testing.
 	}
 }
 
+func TestAcceptedListenerHostnamesHonorsAllowedRoutes(t *testing.T) {
+	hostname := gatewayv1.Hostname("app.example.com")
+	httpRouteKind := gatewayv1.RouteGroupKind{Kind: "HTTPRoute"}
+	tcpRouteKind := gatewayv1.RouteGroupKind{Kind: "TCPRoute"}
+	fromSame := gatewayv1.NamespacesFromSame
+	fromSelector := gatewayv1.NamespacesFromSelector
+	selector := &metav1.LabelSelector{MatchLabels: map[string]string{"team": "edge"}}
+	route := gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "app"},
+		Spec:       gatewayv1.HTTPRouteSpec{Hostnames: []gatewayv1.Hostname{hostname}},
+	}
+	tests := []struct {
+		name      string
+		gatewayNS string
+		listener  gatewayv1.Listener
+		namespace *corev1.Namespace
+		want      []gatewayv1.Hostname
+		attached  bool
+	}{
+		{
+			name:      "default same-namespace attaches",
+			gatewayNS: "app",
+			listener:  gatewayv1.Listener{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80},
+			want:      []gatewayv1.Hostname{hostname},
+			attached:  true,
+		},
+		{
+			name:      "default rejects cross-namespace",
+			gatewayNS: "infra",
+			listener:  gatewayv1.Listener{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80},
+		},
+		{
+			name:      "kinds omit HTTPRoute",
+			gatewayNS: "app",
+			listener: gatewayv1.Listener{
+				Name:     "http",
+				Protocol: gatewayv1.HTTPProtocolType,
+				Port:     80,
+				AllowedRoutes: &gatewayv1.AllowedRoutes{
+					Kinds: []gatewayv1.RouteGroupKind{tcpRouteKind},
+				},
+			},
+		},
+		{
+			name:      "kinds allow HTTPRoute",
+			gatewayNS: "app",
+			listener: gatewayv1.Listener{
+				Name:     "http",
+				Protocol: gatewayv1.HTTPProtocolType,
+				Port:     80,
+				AllowedRoutes: &gatewayv1.AllowedRoutes{
+					Kinds: []gatewayv1.RouteGroupKind{httpRouteKind},
+				},
+			},
+			want:     []gatewayv1.Hostname{hostname},
+			attached: true,
+		},
+		{
+			name:      "From=Same rejects other namespace",
+			gatewayNS: "infra",
+			listener: gatewayv1.Listener{
+				Name:     "http",
+				Protocol: gatewayv1.HTTPProtocolType,
+				Port:     80,
+				AllowedRoutes: &gatewayv1.AllowedRoutes{
+					Namespaces: &gatewayv1.RouteNamespaces{From: &fromSame},
+				},
+			},
+		},
+		{
+			name:      "selector matches route namespace",
+			gatewayNS: "infra",
+			listener: gatewayv1.Listener{
+				Name:     "http",
+				Protocol: gatewayv1.HTTPProtocolType,
+				Port:     80,
+				AllowedRoutes: &gatewayv1.AllowedRoutes{
+					Namespaces: &gatewayv1.RouteNamespaces{From: &fromSelector, Selector: selector},
+				},
+			},
+			namespace: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "app", Labels: map[string]string{"team": "edge"}}},
+			want:      []gatewayv1.Hostname{hostname},
+			attached:  true,
+		},
+		{
+			name:      "selector rejects unlabeled namespace",
+			gatewayNS: "infra",
+			listener: gatewayv1.Listener{
+				Name:     "http",
+				Protocol: gatewayv1.HTTPProtocolType,
+				Port:     80,
+				AllowedRoutes: &gatewayv1.AllowedRoutes{
+					Namespaces: &gatewayv1.RouteNamespaces{From: &fromSelector, Selector: selector},
+				},
+			},
+			namespace: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "app", Labels: map[string]string{"team": "other"}}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			if err := corev1.AddToScheme(scheme); err != nil {
+				t.Fatal(err)
+			}
+			builder := fake.NewClientBuilder().WithScheme(scheme)
+			if test.namespace != nil {
+				builder = builder.WithObjects(test.namespace)
+			}
+			kube := builder.Build()
+			gateway := gatewayv1.Gateway{
+				ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: test.gatewayNS},
+				Spec:       gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{test.listener}},
+			}
+			got, attached, err := acceptedListenerHostnames(context.Background(), kube, gateway, gatewayv1.ParentReference{Name: "edge"}, route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if attached != test.attached || !slices.Equal(got, test.want) {
+				t.Fatalf("got hostnames %v attached=%t, want %v attached=%t", got, attached, test.want, test.attached)
+			}
+		})
+	}
+}
+
 func TestAcceptedRouteHostnamesReturnsEffectiveIntersections(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -752,15 +876,15 @@ func ingressRuleForService(host, service string, port int32) networkingv1.Ingres
 
 func mikroTikGatewayFixture() (gatewayv1.GatewayClass, gatewayv1.Gateway) {
 	return gatewayv1.GatewayClass{
-		ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
-		Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
-	}, gatewayv1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
-		Spec: gatewayv1.GatewaySpec{
-			GatewayClassName: api.GatewayClassName,
-			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
-		},
-	}
+			ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
+			Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
+		}, gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: api.GatewayClassName,
+				Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+			},
+		}
 }
 
 func httpBackendRef(name string, namespace gatewayv1.Namespace, port gatewayv1.PortNumber) gatewayv1.HTTPBackendRef {
@@ -814,6 +938,19 @@ func TestServiceRouteRouterRefsReturnsAllDistinctKnownRouters(t *testing.T) {
 }
 
 func pointerTo[T any](value T) *T { return &value }
+
+func reconcileUntil(t *testing.T, do func() error, done func() bool) {
+	t.Helper()
+	for i := 0; i < 8; i++ {
+		if err := do(); err != nil {
+			t.Fatalf("reconcile %d: %v", i+1, err)
+		}
+		if done() {
+			return
+		}
+	}
+	t.Fatal("reconcile did not converge")
+}
 
 func reconcileRequest(namespace, name string) reconcile.Request {
 	return reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}}

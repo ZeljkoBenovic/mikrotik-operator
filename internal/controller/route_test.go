@@ -121,6 +121,52 @@ func TestRouteReconcilerIgnoresMissingObject(t *testing.T) {
 	}
 }
 
+func TestRouteReconcilerMovesLeftoverWhenRouterRefChanges(t *testing.T) {
+	scheme, objects, factory, clients := activeExternalCleanupFixture(t)
+	route := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a"},
+		},
+		Spec:   api.MikroTikRouteSpec{Destination: "10.0.0.8/32", Gateway: "192.0.2.1", RouterRef: "router-b"},
+		Status: api.MikroTikRouteStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &route)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&route).Build()
+	reconciler := RouteReconciler{Client: kube, Factory: factory}
+	reconcileUntil(t, func() error {
+		_, err := reconciler.Reconcile(context.Background(), reconcileRequest(route.Namespace, route.Name))
+		return err
+	}, func() bool {
+		var stored api.MikroTikRoute
+		if err := kube.Get(context.Background(), types.NamespacedName{Namespace: route.Namespace, Name: route.Name}, &stored); err != nil {
+			t.Fatal(err)
+		}
+		return stored.Status.Applied && stored.Status.RouterRef == "router-b"
+	})
+	if len(clients["router-a"].deletedRouteComments) == 0 {
+		t.Fatal("router-a leftover route was not deleted after routerRef change")
+	}
+	if len(clients["router-b"].deletedRouteComments) != 0 {
+		t.Fatalf("router-b was cleaned unexpectedly: %#v", clients["router-b"].deletedRouteComments)
+	}
+	if len(clients["router-a"].ensuredRouteDestinations) != 0 {
+		t.Fatalf("router-a received apply after move: %#v", clients["router-a"].ensuredRouteDestinations)
+	}
+	if len(clients["router-b"].ensuredRouteDestinations) == 0 {
+		t.Fatal("router-b did not receive the moved route")
+	}
+	var stored api.MikroTikRoute
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: route.Namespace, Name: route.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[durableRouterTargetsAnnotation] != "router-b" {
+		t.Fatalf("durable router annotation = %q, want router-b", stored.Annotations[durableRouterTargetsAnnotation])
+	}
+}
+
 func TestRouteReconcilerDeletesRouterOSOnDeletion(t *testing.T) {
 	scheme, objects, factory, clients := externalCleanupFixture(t)
 	now := metav1.NewTime(time.Now())

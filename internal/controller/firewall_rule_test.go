@@ -138,6 +138,52 @@ func TestFirewallRuleReconcilerIgnoresMissingObject(t *testing.T) {
 	}
 }
 
+func TestFirewallRuleReconcilerMovesLeftoverWhenRouterRefChanges(t *testing.T) {
+	scheme, objects, factory, clients := activeExternalCleanupFixture(t)
+	rule := api.MikroTikFirewallRule{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web-allow",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a"},
+		},
+		Spec:   api.MikroTikFirewallRuleSpec{Chain: "forward", Action: "accept", RouterRef: "router-b"},
+		Status: api.MikroTikFirewallRuleStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &rule)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&rule).Build()
+	reconciler := FirewallRuleReconciler{Client: kube, Factory: factory}
+	reconcileUntil(t, func() error {
+		_, err := reconciler.Reconcile(context.Background(), reconcileRequest(rule.Namespace, rule.Name))
+		return err
+	}, func() bool {
+		var stored api.MikroTikFirewallRule
+		if err := kube.Get(context.Background(), types.NamespacedName{Namespace: rule.Namespace, Name: rule.Name}, &stored); err != nil {
+			t.Fatal(err)
+		}
+		return stored.Status.Applied && stored.Status.RouterRef == "router-b"
+	})
+	if clients["router-a"].deletedFirewall == 0 {
+		t.Fatal("router-a leftover firewall rule was not deleted after routerRef change")
+	}
+	if clients["router-b"].deletedFirewall != 0 {
+		t.Fatal("router-b was cleaned unexpectedly")
+	}
+	if clients["router-a"].ensuredFirewall != 0 {
+		t.Fatal("router-a received apply after move")
+	}
+	if clients["router-b"].ensuredFirewall == 0 {
+		t.Fatal("router-b did not receive the moved firewall rule")
+	}
+	var stored api.MikroTikFirewallRule
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: rule.Namespace, Name: rule.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[durableRouterTargetsAnnotation] != "router-b" {
+		t.Fatalf("durable router annotation = %q, want router-b", stored.Annotations[durableRouterTargetsAnnotation])
+	}
+}
+
 func TestFirewallRuleReconcilerDeletesRouterOSOnDeletion(t *testing.T) {
 	scheme, objects, factory, clients := externalCleanupFixture(t)
 	now := metav1.NewTime(time.Now())
