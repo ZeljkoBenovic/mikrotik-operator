@@ -168,6 +168,32 @@ func TestServiceDNSReconcilerDeletesRoutesWhenDNSAnnotationRemoved(t *testing.T)
 	}
 }
 
+func TestServiceDNSReconcilerClearsLeftoverRouterAnnotationWithoutFinalizer(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "web",
+			Namespace: "app",
+			Annotations: map[string]string{
+				serviceRouteRouterAnnotation: "router-a",
+			},
+		},
+		Spec: corev1.ServiceSpec{ClusterIP: "10.43.0.10", Ports: []corev1.ServicePort{{Port: 80}}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(service.Namespace, service.Name)); err != nil {
+		t.Fatal(err)
+	}
+	var stored corev1.Service
+	if err := kube.Get(context.Background(), types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[serviceRouteRouterAnnotation] != "" {
+		t.Fatalf("leftover service router annotation = %q, want cleared", stored.Annotations[serviceRouteRouterAnnotation])
+	}
+}
+
 func TestServiceDNSReconcilerDeletesRoutesOnServiceDeletion(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	service, router, node := annotatedClusterIPFixture()

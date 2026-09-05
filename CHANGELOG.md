@@ -18,6 +18,9 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover leftover RouterOS cleanup when `spec.routerRef` changes, DNS/port-forward
+  cleanup after a referenced Service or Pod disappears, Service route-history
+  annotation compacting, and HTTPRoute `AllowedRoutes` kinds/namespace selectors.
 
 ## [0.4.0] - 2026-09-01
 

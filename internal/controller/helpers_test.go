@@ -324,6 +324,57 @@ func TestPersistServiceRouteRouterTargetKeepsMissingChildHistory(t *testing.T) {
 	}
 }
 
+func TestCompactServiceRouteRouterTargetReplacesAndClearsAnnotation(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name:        "backend",
+		Namespace:   "app",
+		Annotations: map[string]string{serviceRouteRouterAnnotation: "router-a,router-b"},
+	}}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(service).Build()
+
+	updated, err := compactServiceRouteRouterTarget(context.Background(), kube, service, "router-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated {
+		t.Fatal("compact to a single target did not persist")
+	}
+	if service.Annotations[serviceRouteRouterAnnotation] != "router-b" {
+		t.Fatalf("annotation = %q, want router-b", service.Annotations[serviceRouteRouterAnnotation])
+	}
+
+	updated, err = compactServiceRouteRouterTarget(context.Background(), kube, service, "router-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated {
+		t.Fatal("identical target was written again")
+	}
+
+	updated, err = compactServiceRouteRouterTarget(context.Background(), kube, service, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated {
+		t.Fatal("clearing service router history did not persist")
+	}
+	if _, exists := service.Annotations[serviceRouteRouterAnnotation]; exists {
+		t.Fatalf("annotation still present: %q", service.Annotations[serviceRouteRouterAnnotation])
+	}
+
+	updated, err = compactServiceRouteRouterTarget(context.Background(), kube, service, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated {
+		t.Fatal("clearing a missing annotation wrote the Service again")
+	}
+}
+
 func TestCompactDurableRouterTargetReplacesAndClearsAnnotation(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := api.AddToScheme(scheme); err != nil {

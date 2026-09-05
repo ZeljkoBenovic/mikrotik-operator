@@ -20,6 +20,88 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
+func TestDNSReconcilerMovesLeftoverWhenRouterRefChanges(t *testing.T) {
+	scheme, objects, factory, clients := activeExternalCleanupFixture(t)
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "ui",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a"},
+		},
+		Spec:   api.MikroTikDNSRecordSpec{Name: "ui.home.arpa", Address: "10.0.0.8", RouterRef: "router-b"},
+		Status: api.MikroTikDNSRecordStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &record)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&record).Build()
+	reconciler := DNSReconciler{Client: kube, Factory: factory}
+	reconcileUntil(t, func() error {
+		_, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name))
+		return err
+	}, func() bool {
+		var stored api.MikroTikDNSRecord
+		if err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored); err != nil {
+			t.Fatal(err)
+		}
+		return stored.Status.Applied && stored.Status.RouterRef == "router-b"
+	})
+	if clients["router-a"].deletedDNS == 0 {
+		t.Fatal("router-a leftover DNS record was not deleted after routerRef change")
+	}
+	if clients["router-b"].deletedDNS != 0 {
+		t.Fatal("router-b was cleaned unexpectedly")
+	}
+	if clients["router-a"].ensuredDNS != 0 {
+		t.Fatal("router-a received apply after move")
+	}
+	if clients["router-b"].ensuredDNS == 0 {
+		t.Fatal("router-b did not receive the moved DNS record")
+	}
+	var stored api.MikroTikDNSRecord
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[durableRouterTargetsAnnotation] != "router-b" {
+		t.Fatalf("durable router annotation = %q, want router-b", stored.Annotations[durableRouterTargetsAnnotation])
+	}
+}
+
+func TestDNSReconcilerCleansDurableTargetWhenServiceIsMissing(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "ui",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a,router-b"},
+		},
+		Spec: api.MikroTikDNSRecordSpec{
+			Name:       "ui.home.arpa",
+			RouterRef:  "router-a",
+			ServiceRef: &api.NamespacedName{Namespace: "app", Name: "missing"},
+		},
+		Status: api.MikroTikDNSRecordStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &record)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&record).Build()
+	reconciler := DNSReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
+		t.Fatal(err)
+	}
+	for name, routerClient := range clients {
+		if routerClient.deletedDNS == 0 {
+			t.Fatalf("%s leftover DNS was not deleted after Service disappearance", name)
+		}
+	}
+	var stored api.MikroTikDNSRecord
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status.Applied {
+		t.Fatal("missing Service left the DNS record marked applied")
+	}
+}
+
 func TestDNSNonAddressableServiceCleansEveryDurableRouter(t *testing.T) {
 	scheme, objects, factory, clients := externalCleanupFixture(t)
 	record := api.MikroTikDNSRecord{
@@ -382,6 +464,20 @@ func externalCleanupFixture(t *testing.T) (*runtime.Scheme, []client.Object, ros
 		return clients["router-b"], nil
 	}
 	return scheme, []client.Object{routerA, routerB, secret}, factory, clients
+}
+
+func activeExternalCleanupFixture(t *testing.T) (*runtime.Scheme, []client.Object, ros.Factory, map[string]*recordingRouterClient) {
+	t.Helper()
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	for _, object := range objects {
+		router, ok := object.(*api.MikroTikRouter)
+		if !ok {
+			continue
+		}
+		router.Finalizers = []string{resourceFinalizer}
+		router.Status.AppliedEndpoints = routerEndpoints(*router)
+	}
+	return scheme, objects, factory, clients
 }
 
 type recordingRouterClient struct {
