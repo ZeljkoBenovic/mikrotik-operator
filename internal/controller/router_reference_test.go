@@ -322,6 +322,59 @@ func TestDNSReconcilerAppliesNamespaceNameRouterRef(t *testing.T) {
 	}
 }
 
+func TestDNSReconcilerAppliesHostnameAndTTL(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikDNSRecordSpec{
+			RouterRef: router.Name,
+			Name:      "web.home.arpa",
+			Address:   "10.0.0.8",
+			TTL:       "1h",
+		},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &record).
+		WithStatusSubresource(&router, &record).
+		Build()
+	reconciler := DNSReconciler{Client: kube, Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+		return routerClient, nil
+	}}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if len(routerClient.ensuredDNSNames) == 0 {
+		t.Fatal("expected DNS apply")
+	}
+	if got := routerClient.ensuredDNSNames[len(routerClient.ensuredDNSNames)-1]; got != "web.home.arpa" {
+		t.Fatalf("EnsureDNS name = %q, want web.home.arpa", got)
+	}
+	if got := routerClient.ensuredDNSAddresses[len(routerClient.ensuredDNSAddresses)-1]; got != "10.0.0.8" {
+		t.Fatalf("EnsureDNS address = %q, want 10.0.0.8", got)
+	}
+	if got := routerClient.ensuredDNSTTLs[len(routerClient.ensuredDNSTTLs)-1]; got != "1h" {
+		t.Fatalf("EnsureDNS ttl = %q, want 1h", got)
+	}
+}
+
 func TestWithRouterConnectionsResolvesSlashNameKey(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	endpoint := api.RouterEndpoint{
