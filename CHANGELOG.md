@@ -7,6 +7,13 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- `MikroTikPortForward` objects that target a Pod now remove leftover dst-nat,
+  src-nat, and forward-accept rules when the Pod exists but has no IP. The
+  previous Service-only cleanup left NAT pointed at a recycled address after
+  a restart or a stuck Pending Pod.
+
 ### Added
 
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.

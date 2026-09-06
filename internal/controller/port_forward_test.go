@@ -181,6 +181,77 @@ func TestPortForwardReconcilerRejectsInvalidDestinationAddress(t *testing.T) {
 	}
 }
 
+func TestPortForwardReconcilerRemovesNATWhenPodIPIsEmpty(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Status:     corev1.PodStatus{PodIP: "10.0.0.20"},
+	}
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			RouterRef:    router.Name,
+			Protocol:     "tcp",
+			ExternalPort: 8080,
+			TargetPort:   8080,
+			PodRef:       &api.NamespacedName{Namespace: pod.Namespace, Name: pod.Name},
+		},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &pod, &forward).
+		WithStatusSubresource(&router, &forward, &corev1.Pod{}).
+		Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+		return routerClient, nil
+	}}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if routerClient.ensuredForwards == 0 || routerClient.ensuredFirewall == 0 {
+		t.Fatalf("initial apply missing: forwards=%d firewall=%d", routerClient.ensuredForwards, routerClient.ensuredFirewall)
+	}
+
+	var livePod corev1.Pod
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}, &livePod); err != nil {
+		t.Fatal(err)
+	}
+	livePod.Status.PodIP = ""
+	if err := kube.Status().Update(context.Background(), &livePod); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if routerClient.deletedForwards == 0 || routerClient.deletedFirewall == 0 {
+		t.Fatalf("empty PodIP left stale NAT: deleted forwards=%d firewall=%d", routerClient.deletedForwards, routerClient.deletedFirewall)
+	}
+	var stored api.MikroTikPortForward
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: forward.Namespace, Name: forward.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status.Applied {
+		t.Fatal("empty PodIP marked port forward applied")
+	}
+}
+
 func TestReconcileServicePortForwardsSetsDestinationAddress(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	service := corev1.Service{
