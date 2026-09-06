@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
@@ -234,6 +235,99 @@ func TestServiceDNSReconcilerDoesNotCreateRouteForNodePort(t *testing.T) {
 	}
 	if got := ownedRoutes(t, kube, &service); len(got) != 0 {
 		t.Fatalf("NodePort Service created route CRs: %#v", got)
+	}
+}
+
+func TestServiceDNSReconcilerRejectsInvalidPublicIP(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service, router, node := annotatedClusterIPFixture()
+	service.Annotations[api.PublicIPAnnotation] = "not-an-ip"
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &router, &node).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	_, err := reconciler.Reconcile(context.Background(), reconcileRequest(service.Namespace, service.Name))
+	if err == nil || !strings.Contains(err.Error(), api.PublicIPAnnotation) {
+		t.Fatalf("error = %v, want %s validation", err, api.PublicIPAnnotation)
+	}
+	if got := ownedPortForwards(t, kube, &service); len(got) != 0 {
+		t.Fatalf("invalid public-ip created port-forward CRs: %#v", got)
+	}
+	if got := ownedRoutes(t, kube, &service); len(got) != 0 {
+		t.Fatalf("invalid public-ip created route CRs: %#v", got)
+	}
+}
+
+func TestServiceDNSReconcilerRejectsUnsupportedRouteMode(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service, router, node := annotatedClusterIPFixture()
+	service.Annotations[api.RouteModeAnnotation] = "primary"
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &router, &node).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	_, err := reconciler.Reconcile(context.Background(), reconcileRequest(service.Namespace, service.Name))
+	if err == nil || !strings.Contains(err.Error(), api.RouteModeAnnotation) {
+		t.Fatalf("error = %v, want %s validation", err, api.RouteModeAnnotation)
+	}
+	if got := ownedRoutes(t, kube, &service); len(got) != 0 {
+		t.Fatalf("unsupported route-mode created route CRs: %#v", got)
+	}
+	assertNotFound(t, kube, &api.MikroTikDNSRecord{}, service.Namespace, service.Name+"-dns")
+}
+
+func TestServiceDNSReconcilerCreatesPortForwardsFromPublicIPOnly(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service, router, _ := annotatedClusterIPFixture()
+	delete(service.Annotations, api.DNSNameAnnotation)
+	service.Annotations[api.PublicIPAnnotation] = "198.51.100.10"
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &router).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(service.Namespace, service.Name)); err != nil {
+		t.Fatal(err)
+	}
+	forwards := ownedPortForwards(t, kube, &service)
+	if len(forwards) != 1 {
+		t.Fatalf("generated port forwards = %d, want 1", len(forwards))
+	}
+	got := forwards[0]
+	if got.Spec.DestinationAddress != "198.51.100.10" || got.Spec.ExternalPort != 80 || got.Spec.Protocol != "tcp" {
+		t.Fatalf("generated port forward spec = %#v", got.Spec)
+	}
+	if got.Spec.ServiceRef == nil || got.Spec.ServiceRef.Name != service.Name || got.Spec.ServiceRef.Namespace != service.Namespace {
+		t.Fatalf("generated serviceRef = %#v, want %s/%s", got.Spec.ServiceRef, service.Namespace, service.Name)
+	}
+	if got := ownedRoutes(t, kube, &service); len(got) != 0 {
+		t.Fatalf("public-ip-only Service created route CRs: %#v", got)
+	}
+	assertNotFound(t, kube, &api.MikroTikDNSRecord{}, service.Namespace, service.Name+"-dns")
+}
+
+func TestServiceDNSReconcilerRequiresRouterRefWhenMultipleRouters(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service, _, node := annotatedClusterIPFixture()
+	first := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "network"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	second := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "core", Namespace: "other"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.2",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &first, &second, &node).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	_, err := reconciler.Reconcile(context.Background(), reconcileRequest(service.Namespace, service.Name))
+	if err == nil || !strings.Contains(err.Error(), api.RouterRefAnnotation) {
+		t.Fatalf("error = %v, want %s guidance", err, api.RouterRefAnnotation)
+	}
+	if !errors.Is(err, errImplicitRouterSelection) {
+		t.Fatalf("error = %v, want %v", err, errImplicitRouterSelection)
+	}
+	assertNotFound(t, kube, &api.MikroTikDNSRecord{}, service.Namespace, service.Name+"-dns")
+	if got := ownedRoutes(t, kube, &service); len(got) != 0 {
+		t.Fatalf("ambiguous router created route CRs: %#v", got)
 	}
 }
 
@@ -574,6 +668,21 @@ func reconcileServiceUntil(t *testing.T, reconciler ServiceDNSReconciler, servic
 		}
 	}
 	return nil
+}
+
+func ownedPortForwards(t *testing.T, kube client.Client, owner client.Object) []api.MikroTikPortForward {
+	t.Helper()
+	var list api.MikroTikPortForwardList
+	if err := kube.List(context.Background(), &list, client.InNamespace(owner.GetNamespace())); err != nil {
+		t.Fatal(err)
+	}
+	owned := make([]api.MikroTikPortForward, 0)
+	for _, forward := range list.Items {
+		if metav1.IsControlledBy(&forward, owner) {
+			owned = append(owned, forward)
+		}
+	}
+	return owned
 }
 
 func ownedRoutes(t *testing.T, kube client.Client, owner client.Object) []api.MikroTikRoute {

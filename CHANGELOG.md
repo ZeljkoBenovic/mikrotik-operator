@@ -14,6 +14,9 @@ and the project follows semantic versioning.
 
 ### Tests
 
+- Cover invalid `public-ip` / `route-mode` Service annotations, public-IP-only
+  generated port-forwards, ServiceRef ClusterIP dst-nat targeting, DNS hostname
+  and TTL apply, and skipping non-TCP/UDP generated NAT children.
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name

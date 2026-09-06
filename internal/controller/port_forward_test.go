@@ -181,6 +181,121 @@ func TestPortForwardReconcilerRejectsInvalidDestinationAddress(t *testing.T) {
 	}
 }
 
+func TestPortForwardReconcilerAppliesServiceRefClusterIP(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.43.0.20"},
+	}
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			RouterRef:    router.Name,
+			Protocol:     "tcp",
+			ExternalPort: 443,
+			TargetPort:   8443,
+			ServiceRef:   &api.NamespacedName{Namespace: service.Namespace, Name: service.Name},
+		},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &service, &forward).
+		WithStatusSubresource(&router, &forward).
+		Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+		return routerClient, nil
+	}}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if len(routerClient.ensuredPortForwards) == 0 {
+		t.Fatal("expected dst-nat apply from Service ClusterIP")
+	}
+	got := routerClient.ensuredPortForwards[len(routerClient.ensuredPortForwards)-1]
+	if got.Target != "10.43.0.20" || got.TargetPort != 8443 || got.ExternalPort != 443 {
+		t.Fatalf("dst-nat = %#v, want target 10.43.0.20:8443 from ServiceRef", got)
+	}
+	if len(routerClient.ensuredFirewallRules) == 0 {
+		t.Fatal("expected accept firewall apply")
+	}
+	firewall := routerClient.ensuredFirewallRules[len(routerClient.ensuredFirewallRules)-1]
+	if firewall.DestinationAddress != "10.43.0.20" || firewall.DestinationPort != "8443" {
+		t.Fatalf("firewall matchers = %#v, want ClusterIP 10.43.0.20:8443", firewall)
+	}
+	var stored api.MikroTikPortForward
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: forward.Namespace, Name: forward.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Status.Applied || stored.Status.TargetAddress != "10.43.0.20" {
+		t.Fatalf("status = %#v, want applied target 10.43.0.20", stored.Status)
+	}
+}
+
+func TestReconcileServicePortForwardsKeepsTCPAndUDPSkipsSCTP(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app", UID: "svc-uid"},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.43.0.10",
+			Ports: []corev1.ServicePort{
+				{Name: "http", Port: 80, Protocol: corev1.ProtocolTCP},
+				{Name: "dns", Port: 53, Protocol: corev1.ProtocolUDP},
+				{Name: "sctp", Port: 132, Protocol: corev1.ProtocolSCTP},
+			},
+		},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service).Build()
+	if err := reconcileServicePortForwards(context.Background(), portForwardReconcileRequest{
+		kube:       kube,
+		scheme:     scheme,
+		owner:      &service,
+		sourceName: "service/" + service.Name,
+		namespace:  service.Namespace,
+		publicIP:   "198.51.100.10",
+		routerRef:  "home-router",
+		services:   []corev1.Service{service},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var forwards api.MikroTikPortForwardList
+	if err := kube.List(context.Background(), &forwards, client.InNamespace(service.Namespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(forwards.Items) != 2 {
+		t.Fatalf("generated port forwards = %d, want 2 (tcp+udp)", len(forwards.Items))
+	}
+	got := map[string]api.MikroTikPortForwardSpec{}
+	for _, forward := range forwards.Items {
+		got[forward.Spec.Protocol] = forward.Spec
+	}
+	if spec, ok := got["tcp"]; !ok || spec.ExternalPort != 80 || spec.TargetPort != 80 {
+		t.Fatalf("tcp forward = %#v, want :80", spec)
+	}
+	if spec, ok := got["udp"]; !ok || spec.ExternalPort != 53 || spec.TargetPort != 53 {
+		t.Fatalf("udp forward = %#v, want :53", spec)
+	}
+	if _, ok := got["sctp"]; ok {
+		t.Fatal("SCTP port generated a dst-nat child")
+	}
+}
+
 func TestReconcileServicePortForwardsSetsDestinationAddress(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	service := corev1.Service{
