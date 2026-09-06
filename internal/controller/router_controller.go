@@ -2910,12 +2910,11 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 		address = pod.Status.PodIP
 	}
 	if net.ParseIP(address) == nil {
-		if o.Spec.ServiceRef != nil {
-			if cleanupErr := p.cleanupAllConfiguration(ctx, &o); cleanupErr != nil {
-				return p.status(ctx, &o, errors.Join(fmt.Errorf("target address %q is not an IP", address), cleanupErr))
-			}
+		targetErr := fmt.Errorf("target address %q is not an IP", address)
+		if cleanupErr := p.cleanupAllConfiguration(ctx, &o); cleanupErr != nil {
+			return p.status(ctx, &o, errors.Join(targetErr, cleanupErr))
 		}
-		return p.status(ctx, &o, fmt.Errorf("target address %q is not an IP", address))
+		return p.status(ctx, &o, targetErr)
 	}
 	destinationAddress := portForwardDestinationAddress(o)
 	if destinationAddress != "" && net.ParseIP(destinationAddress) == nil {
