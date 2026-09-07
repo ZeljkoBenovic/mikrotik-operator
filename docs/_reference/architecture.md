@@ -57,7 +57,14 @@ RouterOS themselves: they create `MikroTikDNSRecord`, `MikroTikRoute`, and
 Custom resources use the `mikrotik.operator.io/managed-config` finalizer when
 they have external RouterOS state. Older annotated ClusterIP Services may
 still carry `mikrotik.operator.io/service-route`; the operator strips that
-leftover finalizer after owned route children are deleted.
+leftover finalizer after owned route children are deleted. Generated DNS,
+route, and port-forward children are removed when router selection is
+invalid or the generated configuration is ambiguous, instead of leaving
+stale NAT or DNS. The operator does not adopt an unowned CR that happens to
+use the same name.
+
+`MikroTikBackup` and `MikroTikRestore` are installed as CRDs but are not
+reconciled. See [Reference]({% link _reference/reference.md %}#backup-and-restore-api-preview).
 
 Router objects retain `status.appliedEndpoints` so managed entries can be
 removed during deletion or when an endpoint is dropped. If a referenced
