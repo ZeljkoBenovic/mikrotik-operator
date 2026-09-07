@@ -140,6 +140,69 @@ func TestServiceDNSReconcilerUpdatesRouteWhenClusterIPChanges(t *testing.T) {
 	}
 }
 
+func TestServiceDNSReconcilerCreatesOwnedDNSRecord(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service, router, node := annotatedClusterIPFixture()
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &router, &node).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	if err := reconcileServiceUntil(t, reconciler, service); err != nil {
+		t.Fatal(err)
+	}
+	records := ownedDNSRecords(t, kube, &service)
+	if len(records) != 1 {
+		t.Fatalf("got %d owned MikroTikDNSRecord CRs, want 1", len(records))
+	}
+	record := records[0]
+	if record.Name != service.Name+"-dns" {
+		t.Fatalf("DNS child name %q, want %q", record.Name, service.Name+"-dns")
+	}
+	if record.Spec.Name != "web.home.arpa" {
+		t.Fatalf("spec.name %q, want web.home.arpa", record.Spec.Name)
+	}
+	if record.Spec.Address != "10.0.0.8" {
+		t.Fatalf("spec.address %q, want 10.0.0.8", record.Spec.Address)
+	}
+	if record.Spec.RouterRef != router.Name {
+		t.Fatalf("spec.routerRef %q, want %q", record.Spec.RouterRef, router.Name)
+	}
+	if !metav1.IsControlledBy(&record, &service) {
+		t.Fatal("MikroTikDNSRecord is not owned by the Service")
+	}
+}
+
+func TestServiceDNSReconcilerUpdatesDNSRecordWhenNameChanges(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service, router, node := annotatedClusterIPFixture()
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &router, &node).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	if err := reconcileServiceUntil(t, reconciler, service); err != nil {
+		t.Fatal(err)
+	}
+
+	var stored corev1.Service
+	if err := kube.Get(context.Background(), types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	stored.Annotations[api.DNSNameAnnotation] = "app.home.arpa"
+	if err := kube.Update(context.Background(), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileServiceUntil(t, reconciler, stored); err != nil {
+		t.Fatal(err)
+	}
+
+	records := ownedDNSRecords(t, kube, &stored)
+	if len(records) != 1 {
+		t.Fatalf("got %d owned DNS CRs after rename, want 1", len(records))
+	}
+	if records[0].Spec.Name != "app.home.arpa" {
+		t.Fatalf("spec.name %q, want app.home.arpa", records[0].Spec.Name)
+	}
+	if records[0].Spec.Address != "10.0.0.8" {
+		t.Fatalf("spec.address %q, want 10.0.0.8", records[0].Spec.Address)
+	}
+}
+
 func TestServiceDNSReconcilerDeletesRoutesWhenDNSAnnotationRemoved(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	service, router, node := annotatedClusterIPFixture()
@@ -165,6 +228,9 @@ func TestServiceDNSReconcilerDeletesRoutesWhenDNSAnnotationRemoved(t *testing.T)
 	}
 	if got := ownedRoutes(t, kube, &stored); len(got) != 0 {
 		t.Fatalf("owned route CRs remained after annotation removal: %#v", got)
+	}
+	if got := ownedDNSRecords(t, kube, &stored); len(got) != 0 {
+		t.Fatalf("owned DNS CRs remained after annotation removal: %#v", got)
 	}
 }
 
@@ -363,6 +429,22 @@ func TestIngressReconcilerCreatesOwnedRouteCRsWithoutRouterOS(t *testing.T) {
 	}
 	if routes[0].Spec.Destination != "10.0.0.8/32" || routes[0].Spec.Gateway != "192.0.2.10" {
 		t.Fatalf("unexpected route spec: %#v", routes[0].Spec)
+	}
+	records := ownedDNSRecords(t, kube, &ingress)
+	if len(records) != 1 {
+		t.Fatalf("got %d owned MikroTikDNSRecord CRs, want 1", len(records))
+	}
+	if records[0].Spec.Name != "web.home.arpa" {
+		t.Fatalf("spec.name %q, want web.home.arpa", records[0].Spec.Name)
+	}
+	if records[0].Spec.Address != "10.0.0.8" {
+		t.Fatalf("spec.address %q, want 10.0.0.8", records[0].Spec.Address)
+	}
+	if records[0].Spec.ServiceRef == nil || records[0].Spec.ServiceRef.Name != service.Name {
+		t.Fatalf("unexpected serviceRef: %#v", records[0].Spec.ServiceRef)
+	}
+	if !metav1.IsControlledBy(&records[0], &ingress) {
+		t.Fatal("MikroTikDNSRecord is not owned by the Ingress")
 	}
 }
 
@@ -586,6 +668,21 @@ func ownedRoutes(t *testing.T, kube client.Client, owner client.Object) []api.Mi
 	for _, route := range list.Items {
 		if metav1.IsControlledBy(&route, owner) {
 			owned = append(owned, route)
+		}
+	}
+	return owned
+}
+
+func ownedDNSRecords(t *testing.T, kube client.Client, owner client.Object) []api.MikroTikDNSRecord {
+	t.Helper()
+	var list api.MikroTikDNSRecordList
+	if err := kube.List(context.Background(), &list, client.InNamespace(owner.GetNamespace())); err != nil {
+		t.Fatal(err)
+	}
+	owned := make([]api.MikroTikDNSRecord, 0)
+	for _, record := range list.Items {
+		if metav1.IsControlledBy(&record, owner) {
+			owned = append(owned, record)
 		}
 	}
 	return owned

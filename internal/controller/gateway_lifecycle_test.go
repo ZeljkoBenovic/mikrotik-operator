@@ -247,6 +247,34 @@ func TestCleanupOwnedChildrenPreservesUnownedLabelCollisions(t *testing.T) {
 	assertExists(t, kube, &api.MikroTikPortForward{}, "app", "unowned-pf")
 }
 
+func TestIngressWrongControllerCleansOwnedChildren(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	className := api.IngressClassName
+	ingressClass := networkingv1.IngressClass{
+		ObjectMeta: metav1.ObjectMeta{Name: className},
+		Spec:       networkingv1.IngressClassSpec{Controller: "k8s.io/ingress-nginx"},
+	}
+	ingress := networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "ingress", Namespace: "app", UID: "ingress-uid"},
+		Spec:       networkingv1.IngressSpec{IngressClassName: &className},
+	}
+	record := api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "dns", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/ingress": ingress.Name}}}
+	forward := api.MikroTikPortForward{ObjectMeta: metav1.ObjectMeta{Name: "forward", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/port-forward-source": shortHash("app/ingress/ingress")}}}
+	if err := controllerutil.SetControllerReference(&ingress, &record, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(&ingress, &forward, scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&ingressClass, &ingress, &record, &forward).Build()
+	reconciler := IngressReconciler{Client: kube, RuntimeScheme: scheme}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "ingress")); err != nil {
+		t.Fatal(err)
+	}
+	assertNotFound(t, kube, &api.MikroTikDNSRecord{}, "app", "dns")
+	assertNotFound(t, kube, &api.MikroTikPortForward{}, "app", "forward")
+}
+
 func TestIngressMissingClassCleansOwnedChildren(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	className := api.IngressClassName
@@ -736,6 +764,148 @@ func TestHTTPRouteSameServiceNameAcrossNamespacesHasUniquePortForwardChildren(t 
 	}
 }
 
+func TestHTTPRouteReconcilerCreatesOwnedDNSRecord(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	gatewayClass, gateway := mikroTikGatewayFixture()
+	route := gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "route",
+			Namespace: "app",
+			UID:       "route-uid",
+			Annotations: map[string]string{
+				api.RouterRefAnnotation: "router",
+			},
+		},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge"}}},
+			Hostnames:       []gatewayv1.Hostname{"app.home.arpa"},
+			Rules: []gatewayv1.HTTPRouteRule{{
+				BackendRefs: []gatewayv1.HTTPBackendRef{httpBackendRef("backend", "", 80)},
+			}},
+		},
+	}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{ClusterIP: "10.0.0.8", Ports: []corev1.ServicePort{{Port: 80}}},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway, &route, &service, &router, &node).Build()
+	reconciler := HTTPRouteReconciler{Client: kube, Scheme: scheme}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "route")); err != nil {
+		t.Fatal(err)
+	}
+	records := ownedDNSRecords(t, kube, &route)
+	if len(records) != 1 {
+		t.Fatalf("got %d owned MikroTikDNSRecord CRs, want 1", len(records))
+	}
+	if records[0].Spec.Name != "app.home.arpa" {
+		t.Fatalf("spec.name %q, want app.home.arpa", records[0].Spec.Name)
+	}
+	if records[0].Spec.Address != "10.0.0.8" {
+		t.Fatalf("spec.address %q, want 10.0.0.8", records[0].Spec.Address)
+	}
+	if records[0].Spec.ServiceRef == nil || records[0].Spec.ServiceRef.Name != service.Name || records[0].Spec.ServiceRef.Namespace != service.Namespace {
+		t.Fatalf("unexpected serviceRef: %#v", records[0].Spec.ServiceRef)
+	}
+	if records[0].Spec.RouterRef != router.Name {
+		t.Fatalf("spec.routerRef %q, want %q", records[0].Spec.RouterRef, router.Name)
+	}
+}
+
+func TestIngressReconcilerResolvesNamedBackendPort(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	className := api.IngressClassName
+	ingressClass := networkingv1.IngressClass{
+		ObjectMeta: metav1.ObjectMeta{Name: api.IngressClassName},
+		Spec:       networkingv1.IngressClassSpec{Controller: api.IngressController},
+	}
+	ingress := networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "web",
+			Namespace: "app",
+			UID:       "ingress-uid",
+			Annotations: map[string]string{
+				api.PublicIPAnnotation:  "198.51.100.10",
+				api.RouterRefAnnotation: "router",
+			},
+		},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: &className,
+			Rules: []networkingv1.IngressRule{{
+				Host: "web.home.arpa",
+				IngressRuleValue: networkingv1.IngressRuleValue{HTTP: &networkingv1.HTTPIngressRuleValue{
+					Paths: []networkingv1.HTTPIngressPath{{
+						Path:     "/",
+						PathType: pointerTo(networkingv1.PathTypePrefix),
+						Backend: networkingv1.IngressBackend{Service: &networkingv1.IngressServiceBackend{
+							Name: "backend",
+							Port: networkingv1.ServiceBackendPort{Name: "http"},
+						}},
+					}},
+				}},
+			}},
+		},
+	}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Spec: corev1.ServiceSpec{
+			Type:      corev1.ServiceTypeClusterIP,
+			ClusterIP: "10.0.0.8",
+			Ports:     []corev1.ServicePort{{Name: "http", Port: 8080, Protocol: corev1.ProtocolTCP}},
+		},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&ingressClass, &ingress, &service, &router, &node).Build()
+	reconciler := IngressReconciler{Client: kube, RuntimeScheme: scheme}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(ingress.Namespace, ingress.Name)); err != nil {
+		t.Fatal(err)
+	}
+	records := ownedDNSRecords(t, kube, &ingress)
+	if len(records) != 1 {
+		t.Fatalf("got %d owned DNS CRs, want 1 for named backend port", len(records))
+	}
+	var forwards api.MikroTikPortForwardList
+	if err := kube.List(context.Background(), &forwards, client.InNamespace("app")); err != nil {
+		t.Fatal(err)
+	}
+	ownedForwards := 0
+	for _, forward := range forwards.Items {
+		if !metav1.IsControlledBy(&forward, &ingress) {
+			continue
+		}
+		ownedForwards++
+		if forward.Spec.ExternalPort != 8080 || forward.Spec.TargetPort != 8080 {
+			t.Fatalf("named port generated NAT ports = %d/%d, want 8080/8080", forward.Spec.ExternalPort, forward.Spec.TargetPort)
+		}
+		if forward.Spec.ServiceRef == nil || forward.Spec.ServiceRef.Name != service.Name {
+			t.Fatalf("unexpected serviceRef: %#v", forward.Spec.ServiceRef)
+		}
+	}
+	if ownedForwards != 1 {
+		t.Fatalf("got %d owned port-forward CRs, want 1", ownedForwards)
+	}
+}
+
 func ingressRuleForService(host, service string, port int32) networkingv1.IngressRule {
 	return networkingv1.IngressRule{
 		Host: host,
@@ -752,15 +922,15 @@ func ingressRuleForService(host, service string, port int32) networkingv1.Ingres
 
 func mikroTikGatewayFixture() (gatewayv1.GatewayClass, gatewayv1.Gateway) {
 	return gatewayv1.GatewayClass{
-		ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
-		Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
-	}, gatewayv1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
-		Spec: gatewayv1.GatewaySpec{
-			GatewayClassName: api.GatewayClassName,
-			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
-		},
-	}
+			ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
+			Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
+		}, gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: api.GatewayClassName,
+				Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+			},
+		}
 }
 
 func httpBackendRef(name string, namespace gatewayv1.Namespace, port gatewayv1.PortNumber) gatewayv1.HTTPBackendRef {
