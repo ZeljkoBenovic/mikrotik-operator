@@ -53,6 +53,10 @@ features:
 | `MikroTikPortForward` | `dst-nat`, `src-nat`, and forward firewall rules |
 | `MikroTikFirewallRule` | `/ip firewall filter` |
 
+Chart `0.5.0` also installs `MikroTikBackup` and `MikroTikRestore` CRDs. Those
+kinds are an API preview: the operator does not reconcile them yet. See
+[Reference](/reference/#backup-and-restore-api-preview).
+
 ## Safety model
 
 Every generated RouterOS entry has a managed comment containing its Kubernetes

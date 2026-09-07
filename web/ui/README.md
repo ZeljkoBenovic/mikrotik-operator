@@ -1,6 +1,9 @@
 # MikroTik Operator Admin UI
 
-React 18 + Vite + TypeScript admin panel for the five MikroTik Operator CRDs. The Go `ui-backend` serves this SPA and proxies the Kubernetes API under `/api`.
+React 18 + Vite + TypeScript admin panel for the five reconciled MikroTik
+Operator CRDs (routers, DNS records, routes, port forwards, firewall rules).
+`MikroTikBackup` and `MikroTikRestore` are not exposed. The Go `ui-backend`
+serves this SPA and proxies the Kubernetes API under `/api`.
 
 This UI has **no authentication**. Use it only on a trusted network or behind an authenticating proxy.
 
