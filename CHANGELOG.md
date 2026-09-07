@@ -14,6 +14,9 @@ and the project follows semantic versioning.
 
 ### Tests
 
+- Cover generated DNS children from Service annotations, Ingress hosts, and
+  HTTPRoute hostnames; named Ingress backend ports; IngressClass controller
+  mismatch cleanup; and PodRef dst-nat targeting.
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
