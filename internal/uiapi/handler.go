@@ -335,18 +335,43 @@ func (h *handler) lookupObject(w http.ResponseWriter, r *http.Request) (kindSpec
 // preserveManagedMetadata keeps operator-owned metadata on a spec replace.
 // The admin UI PUT body is spec-only, so a naive Update would drop the
 // managed-config finalizer and skip RouterOS cleanup on the next delete.
+// A body that includes any annotations still must keep router-targets;
+// otherwise delete cleans only the current routerRef and leaves stale
+// DNS/NAT/route/firewall entries on routers the resource previously used.
 func preserveManagedMetadata(existing, obj client.Object) {
 	obj.SetUID(existing.GetUID())
 	obj.SetCreationTimestamp(existing.GetCreationTimestamp())
 	obj.SetGeneration(existing.GetGeneration())
 	obj.SetFinalizers(existing.GetFinalizers())
 	obj.SetOwnerReferences(existing.GetOwnerReferences())
-	if len(obj.GetAnnotations()) == 0 {
-		obj.SetAnnotations(existing.GetAnnotations())
-	}
+	obj.SetAnnotations(mergeManagedAnnotations(existing.GetAnnotations(), obj.GetAnnotations()))
 	if len(obj.GetLabels()) == 0 {
 		obj.SetLabels(existing.GetLabels())
 	}
+}
+
+const durableRouterTargetsAnnotation = "mikrotik.operator.io/router-targets"
+
+func mergeManagedAnnotations(existing, incoming map[string]string) map[string]string {
+	if len(incoming) == 0 {
+		if len(existing) == 0 {
+			return nil
+		}
+		return cloneStringMap(existing)
+	}
+	merged := cloneStringMap(incoming)
+	if target := existing[durableRouterTargetsAnnotation]; target != "" {
+		merged[durableRouterTargetsAnnotation] = target
+	}
+	return merged
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (h *handler) decodeObject(w http.ResponseWriter, r *http.Request, spec kindSpec) (client.Object, bool) {

@@ -236,6 +236,46 @@ func TestUpdatePreservesFinalizers(t *testing.T) {
 	}
 }
 
+func TestUpdatePreservesRouterTargetsWhenRequestSetsAnnotations(t *testing.T) {
+	t.Parallel()
+	record := &api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "www",
+			Namespace:  "app",
+			Finalizers: []string{"mikrotik.operator.io/managed-config"},
+			Annotations: map[string]string{
+				"mikrotik.operator.io/router-targets": "edge,core",
+			},
+		},
+		Spec: api.MikroTikDNSRecordSpec{
+			Name:      "www.example.com",
+			Address:   "10.0.0.8",
+			RouterRef: "core",
+		},
+	}
+	h := newTestHandler(t, record)
+
+	rec := doRequest(t, h, http.MethodPut, "/api/resources/mikrotikdnsrecords/app/www", `{
+		"metadata":{"name":"www","annotations":{"user.note":"keep-me"}},
+		"spec":{"name":"www.example.com","address":"10.0.0.9","routerRef":"core"}
+	}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+
+	got := doRequest(t, h, http.MethodGet, "/api/resources/mikrotikdnsrecords/app/www", "")
+	if got.Code != http.StatusOK {
+		t.Fatalf("get status %d %s", got.Code, got.Body.String())
+	}
+	annotations := asMap(t, asMap(t, decodeMap(t, got)["metadata"])["annotations"])
+	if annotations["user.note"] != "keep-me" {
+		t.Fatalf("user annotation = %#v", annotations)
+	}
+	if annotations["mikrotik.operator.io/router-targets"] != "edge,core" {
+		t.Fatalf("router-targets annotation = %#v", annotations)
+	}
+}
+
 func TestDuplicateCreateConflict(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(t, readyRouter("app", "edge"))

@@ -7,6 +7,12 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Admin UI resource updates keep `mikrotik.operator.io/router-targets` when
+  the PUT body includes other annotations, so delete still cleans every
+  router the resource previously used.
+
 ### Added
 
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
