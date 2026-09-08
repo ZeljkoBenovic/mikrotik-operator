@@ -15,6 +15,79 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
+func TestPortForwardReconcilerAppliesTargetAndCompanionFirewall(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			RouterRef:     router.Name,
+			Protocol:      "udp",
+			ExternalPort:  53,
+			TargetPort:    5353,
+			TargetAddress: "10.0.0.53",
+		},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &forward).
+		WithStatusSubresource(&router, &forward).
+		Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+		return routerClient, nil
+	}}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if len(routerClient.ensuredPortForwards) != 1 {
+		t.Fatalf("dst-nat applies = %d, want 1", len(routerClient.ensuredPortForwards))
+	}
+	got := routerClient.ensuredPortForwards[0]
+	if got.Protocol != "udp" || got.ExternalPort != 53 || got.Target != "10.0.0.53" || got.TargetPort != 5353 {
+		t.Fatalf("unexpected dst-nat: %#v", got)
+	}
+	if got.PublicIP != "" {
+		t.Fatalf("empty destinationAddress still set dst-address %q", got.PublicIP)
+	}
+	if len(routerClient.ensuredFirewallRules) != 1 {
+		t.Fatalf("companion firewall applies = %d, want 1", len(routerClient.ensuredFirewallRules))
+	}
+	rule := routerClient.ensuredFirewallRules[0]
+	if rule.Chain != "forward" || rule.Action != "accept" || rule.Protocol != "udp" {
+		t.Fatalf("unexpected companion firewall: %#v", rule)
+	}
+	if rule.DestinationAddress != "10.0.0.53" || rule.DestinationPort != "5353" || !rule.PlaceBefore {
+		t.Fatalf("companion firewall matchers = %#v", rule)
+	}
+	wantFirewallComment := ros.ManagedComment("portforward-firewall", forward.Name, forward.Namespace)
+	if len(routerClient.ensuredFirewallComments) != 1 || routerClient.ensuredFirewallComments[0] != wantFirewallComment {
+		t.Fatalf("companion firewall comment = %#v, want %q", routerClient.ensuredFirewallComments, wantFirewallComment)
+	}
+	var stored api.MikroTikPortForward
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: forward.Namespace, Name: forward.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Status.Applied || stored.Status.TargetAddress != "10.0.0.53" || stored.Status.RouterRef != router.Name {
+		t.Fatalf("status = %#v, want applied to 10.0.0.53 on %s", stored.Status, router.Name)
+	}
+}
+
 func TestPortForwardReconcilerAppliesSpecDestinationAddress(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	endpoint := api.RouterEndpoint{
