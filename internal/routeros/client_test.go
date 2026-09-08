@@ -424,6 +424,75 @@ func (s *scriptedRouterOSClient) Close() error {
 	return nil
 }
 
+func TestEnsurePortForward_AddsSrcNatMasqueradeForReturnPath(t *testing.T) {
+	comment := ManagedComment("portforward", "web", "apps")
+	empty := &routeros.Reply{}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty},
+			{reply: empty},
+			{reply: empty},
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	err := api.EnsurePortForward(context.Background(), PortForward{
+		Protocol:     "udp",
+		ExternalPort: 53,
+		Target:       "10.0.0.53",
+		TargetPort:   5353,
+		PublicIP:     "203.0.113.10",
+	}, comment)
+	if err != nil {
+		t.Fatalf("EnsurePortForward() error = %v", err)
+	}
+	var dstnat, srcnat []string
+	for _, call := range client.calls {
+		if len(call) == 0 || call[0] != "/ip/firewall/nat/add" {
+			continue
+		}
+		chain := ""
+		for _, arg := range call {
+			if strings.HasPrefix(arg, "=chain=") {
+				chain = strings.TrimPrefix(arg, "=chain=")
+			}
+		}
+		switch chain {
+		case "dstnat":
+			dstnat = call
+		case "srcnat":
+			srcnat = call
+		}
+	}
+	if dstnat == nil || srcnat == nil {
+		t.Fatalf("NAT adds missing dstnat=%v srcnat=%v calls=%#v", dstnat, srcnat, client.calls)
+	}
+	for _, arg := range []string{
+		"=protocol=udp",
+		"=dst-port=53",
+		"=action=dst-nat",
+		"=to-addresses=10.0.0.53",
+		"=to-ports=5353",
+		"=dst-address=203.0.113.10",
+		"=comment=" + comment + "/dstnat",
+	} {
+		if !containsArg(dstnat, arg) {
+			t.Fatalf("dst-nat add %v missing %s", dstnat, arg)
+		}
+	}
+	for _, arg := range []string{
+		"=dst-address=10.0.0.53",
+		"=action=masquerade",
+		"=comment=" + comment + "/srcnat",
+	} {
+		if !containsArg(srcnat, arg) {
+			t.Fatalf("src-nat add %v missing %s", srcnat, arg)
+		}
+	}
+}
+
 func TestEnsurePortForward_OmitsPlaceBeforeOnEmptyTable(t *testing.T) {
 	comment := ManagedComment("portforward", "web", "apps")
 	empty := &routeros.Reply{}

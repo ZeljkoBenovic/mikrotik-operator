@@ -438,6 +438,22 @@ func TestServiceAddress(t *testing.T) {
 			},
 			want: "192.0.2.10",
 		},
+		{
+			name: "load balancer uses cluster IP",
+			service: corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+				Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer, ClusterIP: "10.0.0.8"},
+			},
+			want: "10.0.0.8",
+		},
+		{
+			name: "external name is not addressable",
+			service: corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+				Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeExternalName, ExternalName: "svc.example.com"},
+			},
+			wantErr: true,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -471,6 +487,46 @@ func TestServiceAddressRejectsNodePortWithoutInternalIP(t *testing.T) {
 	_, err := serviceAddress(context.Background(), kube, service)
 	if !errors.Is(err, errServiceNotAddressable) {
 		t.Fatalf("error = %v, want %v", err, errServiceNotAddressable)
+	}
+}
+
+func TestNormalizeGeneratedHostname(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: ""},
+		{name: "lowercase", input: "Web.Example.COM", want: "web.example.com"},
+		{name: "trailing dot", input: "web.example.com.", want: "web.example.com"},
+		{name: "whitespace and trailing dot", input: "  Web.Example.COM.  ", want: "web.example.com"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := normalizeGeneratedHostname(test.input); got != test.want {
+				t.Fatalf("normalizeGeneratedHostname(%q) = %q, want %q", test.input, got, test.want)
+			}
+		})
+	}
+}
+
+func TestNormalizePublicIP(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: ""},
+		{name: "ipv4 whitespace", input: "  203.0.113.10  ", want: "203.0.113.10"},
+		{name: "ipv6 compressed", input: "2001:0db8:0:0:0:0:0:1", want: "2001:db8::1"},
+		{name: "not an ip kept trimmed", input: "  not-an-ip  ", want: "not-an-ip"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := normalizePublicIP(test.input); got != test.want {
+				t.Fatalf("normalizePublicIP(%q) = %q, want %q", test.input, got, test.want)
+			}
+		})
 	}
 }
 

@@ -366,6 +366,106 @@ func TestIngressReconcilerCreatesOwnedRouteCRsWithoutRouterOS(t *testing.T) {
 	}
 }
 
+func TestIngressReconcilerCreatesOwnedPortForwardsWithPublicIP(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	className := api.IngressClassName
+	ingressClass := networkingv1.IngressClass{
+		ObjectMeta: metav1.ObjectMeta{Name: api.IngressClassName},
+		Spec:       networkingv1.IngressClassSpec{Controller: api.IngressController},
+	}
+	ingress := networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "web",
+			Namespace: "app",
+			UID:       "ingress-uid",
+			Annotations: map[string]string{
+				api.PublicIPAnnotation:  "198.51.100.10",
+				api.RouterRefAnnotation: "router",
+			},
+		},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: &className,
+			Rules: []networkingv1.IngressRule{{
+				Host: "web.home.arpa",
+				IngressRuleValue: networkingv1.IngressRuleValue{HTTP: &networkingv1.HTTPIngressRuleValue{
+					Paths: []networkingv1.HTTPIngressPath{{
+						Path:     "/",
+						PathType: pointerTo(networkingv1.PathTypePrefix),
+						Backend: networkingv1.IngressBackend{Service: &networkingv1.IngressServiceBackend{
+							Name: "backend",
+							Port: networkingv1.ServiceBackendPort{Number: 443},
+						}},
+					}},
+				}},
+			}},
+		},
+	}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Spec: corev1.ServiceSpec{
+			Type:      corev1.ServiceTypeClusterIP,
+			ClusterIP: "10.0.0.8",
+			Ports: []corev1.ServicePort{
+				{Name: "https", Port: 443, Protocol: corev1.ProtocolTCP},
+				{Name: "metrics", Port: 9090, Protocol: corev1.ProtocolTCP},
+			},
+		},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&ingressClass, &ingress, &service, &router, &node).Build()
+	factoryCalls := 0
+	reconciler := IngressReconciler{
+		Client:        kube,
+		RuntimeScheme: scheme,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			factoryCalls++
+			return nil, errors.New("ingress reconciler must not call RouterOS")
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(ingress.Namespace, ingress.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if factoryCalls != 0 {
+		t.Fatalf("Ingress reconciler called RouterOS %d times", factoryCalls)
+	}
+	var forwards api.MikroTikPortForwardList
+	if err := kube.List(context.Background(), &forwards, client.InNamespace(ingress.Namespace)); err != nil {
+		t.Fatal(err)
+	}
+	owned := make([]api.MikroTikPortForward, 0)
+	for _, forward := range forwards.Items {
+		if metav1.IsControlledBy(&forward, &ingress) {
+			owned = append(owned, forward)
+		}
+	}
+	if len(owned) != 1 {
+		t.Fatalf("owned port forwards = %d, want 1 (backend port 443 only)", len(owned))
+	}
+	got := owned[0]
+	if got.Spec.DestinationAddress != "198.51.100.10" || got.Annotations[api.PublicIPAnnotation] != "198.51.100.10" {
+		t.Fatalf("generated NAT destination = %#v", got.Spec)
+	}
+	if got.Spec.Protocol != "tcp" || got.Spec.ExternalPort != 443 || got.Spec.TargetPort != 443 {
+		t.Fatalf("generated NAT ports = %#v", got.Spec)
+	}
+	if got.Spec.ServiceRef == nil || got.Spec.ServiceRef.Namespace != service.Namespace || got.Spec.ServiceRef.Name != service.Name {
+		t.Fatalf("generated NAT ServiceRef = %#v", got.Spec.ServiceRef)
+	}
+	if got.Spec.RouterRef != router.Name {
+		t.Fatalf("generated NAT routerRef = %q, want %s", got.Spec.RouterRef, router.Name)
+	}
+}
+
 func TestDNSReconcilerCreatesOwnedRouteCRsForStandaloneServiceRef(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	endpoint := api.RouterEndpoint{Name: "primary", Address: "192.0.2.1", CredentialsSecret: corev1.LocalObjectReference{Name: "creds"}}

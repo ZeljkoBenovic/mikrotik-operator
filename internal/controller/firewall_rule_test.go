@@ -92,6 +92,72 @@ func TestFirewallRuleReconcilerAppliesSpecToRouterOS(t *testing.T) {
 	}
 }
 
+func TestFirewallRuleReconcilerForwardsOptionalMatchers(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	rule := api.MikroTikFirewallRule{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "wan-drop",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikFirewallRuleSpec{
+			RouterRef:          router.Name,
+			Chain:              "input",
+			Action:             "drop",
+			Protocol:           "udp",
+			SourceAddress:      "198.51.100.0/24",
+			DestinationAddress: "192.0.2.10",
+			SourcePort:         "123",
+			DestinationPort:    "161",
+			InInterface:        "ether1",
+			OutInterface:       "bridge",
+			ConnectionState:    []string{"new", "invalid"},
+			ConnectionNatState: []string{"dstnat"},
+			LogPrefix:          "snmp-drop",
+		},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &rule).
+		WithStatusSubresource(&router, &rule).
+		Build()
+	reconciler := FirewallRuleReconciler{Client: kube, Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+		return routerClient, nil
+	}}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(rule.Namespace, rule.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if len(routerClient.ensuredFirewallRules) != 1 {
+		t.Fatalf("ensured firewall rules = %d, want 1", len(routerClient.ensuredFirewallRules))
+	}
+	got := routerClient.ensuredFirewallRules[0]
+	if got.SourcePort != "123" || got.InInterface != "ether1" || got.OutInterface != "bridge" {
+		t.Fatalf("optional interface/port matchers = %#v", got)
+	}
+	if got.LogPrefix != "snmp-drop" {
+		t.Fatalf("log prefix = %q, want snmp-drop", got.LogPrefix)
+	}
+	if len(got.ConnectionNatState) != 1 || got.ConnectionNatState[0] != "dstnat" {
+		t.Fatalf("connection nat state = %#v, want [dstnat]", got.ConnectionNatState)
+	}
+	if len(got.ConnectionState) != 2 || got.ConnectionState[0] != "new" || got.ConnectionState[1] != "invalid" {
+		t.Fatalf("connection state = %#v, want [new invalid]", got.ConnectionState)
+	}
+}
+
 func TestFirewallRuleReconcilerRejectsMissingChainOrAction(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	rule := api.MikroTikFirewallRule{

@@ -14,6 +14,11 @@ and the project follows semantic versioning.
 
 ### Tests
 
+- Cover port-forward target/protocol/ports and the companion forward-accept
+  rule, Ingress and HTTPRoute `public-ip` NAT children for selected backend
+  ports, firewall optional matchers, dst-nat plus src-nat masquerade, hostname
+  and public-IP claim normalization, and LoadBalancer/ExternalName address
+  selection.
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
