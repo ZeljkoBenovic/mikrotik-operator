@@ -189,6 +189,145 @@ func TestAcceptedListenerHostnamesHonorsParentPortAndUnionsListeners(t *testing.
 	}
 }
 
+func TestAcceptedListenerHostnamesHonorsAllowedRoutes(t *testing.T) {
+	hostname := gatewayv1.Hostname("app.example.com")
+	same := gatewayv1.NamespacesFromSame
+	all := gatewayv1.NamespacesFromAll
+	selector := gatewayv1.NamespacesFromSelector
+	httpKind := gatewayv1.Kind("HTTPRoute")
+	tcpKind := gatewayv1.Kind("TCPRoute")
+	gatewayGroup := gatewayv1.Group(gatewayv1.GroupVersion.Group)
+	route := gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "app"},
+		Spec:       gatewayv1.HTTPRouteSpec{Hostnames: []gatewayv1.Hostname{hostname}},
+	}
+	tests := []struct {
+		name      string
+		gatewayNS string
+		allowed   *gatewayv1.AllowedRoutes
+		objects   []client.Object
+		want      []gatewayv1.Hostname
+		attached  bool
+	}{
+		{name: "nil AllowedRoutes same namespace", gatewayNS: "app", want: []gatewayv1.Hostname{hostname}, attached: true},
+		{name: "nil AllowedRoutes cross namespace", gatewayNS: "infra"},
+		{
+			name:      "FromSame cross namespace",
+			gatewayNS: "infra",
+			allowed:   &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{From: &same}},
+		},
+		{
+			name:      "FromAll cross namespace",
+			gatewayNS: "infra",
+			allowed:   &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{From: &all}},
+			want:      []gatewayv1.Hostname{hostname},
+			attached:  true,
+		},
+		{
+			name:      "FromSelector matching namespace labels",
+			gatewayNS: "infra",
+			allowed: &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+				From:     &selector,
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "edge"}},
+			}},
+			objects:  []client.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "app", Labels: map[string]string{"team": "edge"}}}},
+			want:     []gatewayv1.Hostname{hostname},
+			attached: true,
+		},
+		{
+			name:      "FromSelector unlabeled namespace",
+			gatewayNS: "infra",
+			allowed: &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+				From:     &selector,
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "edge"}},
+			}},
+			objects: []client.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "app"}}},
+		},
+		{
+			name:      "kinds exclude HTTPRoute",
+			gatewayNS: "app",
+			allowed:   &gatewayv1.AllowedRoutes{Kinds: []gatewayv1.RouteGroupKind{{Kind: tcpKind}}},
+		},
+		{
+			name:      "kinds allow HTTPRoute",
+			gatewayNS: "app",
+			allowed:   &gatewayv1.AllowedRoutes{Kinds: []gatewayv1.RouteGroupKind{{Group: &gatewayGroup, Kind: httpKind}}},
+			want:      []gatewayv1.Hostname{hostname},
+			attached:  true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			scheme := controllerTestScheme(t)
+			gateway := gatewayv1.Gateway{
+				ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: test.gatewayNS},
+				Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{{
+					Name: "https", Protocol: gatewayv1.HTTPSProtocolType, Port: 443, AllowedRoutes: test.allowed,
+				}}},
+			}
+			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(test.objects...).Build()
+			got, attached, err := acceptedListenerHostnames(context.Background(), kube, gateway, gatewayv1.ParentReference{Name: "edge"}, route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if attached != test.attached || !slices.Equal(got, test.want) {
+				t.Fatalf("got hostnames %v attached=%t, want %v attached=%t", got, attached, test.want, test.attached)
+			}
+		})
+	}
+}
+
+func TestAcceptedHostnamesSkipNonMikroTikParents(t *testing.T) {
+	hostname := gatewayv1.Hostname("app.example.com")
+	serviceKind := gatewayv1.Kind("Service")
+	appsGroup := gatewayv1.Group("apps")
+	tests := []struct {
+		name     string
+		mutate   func(*gatewayv1.GatewayClass, *gatewayv1.Gateway, *gatewayv1.HTTPRoute)
+		want     []gatewayv1.Hostname
+		attached bool
+	}{
+		{name: "matching mikrotik gateway", want: []gatewayv1.Hostname{hostname}, attached: true},
+		{name: "parent kind is not Gateway", mutate: func(_ *gatewayv1.GatewayClass, _ *gatewayv1.Gateway, route *gatewayv1.HTTPRoute) {
+			route.Spec.ParentRefs[0].Kind = &serviceKind
+		}},
+		{name: "gateway class controller mismatch", mutate: func(class *gatewayv1.GatewayClass, _ *gatewayv1.Gateway, _ *gatewayv1.HTTPRoute) {
+			class.Spec.ControllerName = "other.example/controller"
+		}},
+		{name: "gateway uses a different class", mutate: func(_ *gatewayv1.GatewayClass, gateway *gatewayv1.Gateway, _ *gatewayv1.HTTPRoute) {
+			gateway.Spec.GatewayClassName = "istio"
+		}},
+		{name: "parent group is not gateway API", mutate: func(_ *gatewayv1.GatewayClass, _ *gatewayv1.Gateway, route *gatewayv1.HTTPRoute) {
+			route.Spec.ParentRefs[0].Group = &appsGroup
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			scheme := controllerTestScheme(t)
+			gatewayClass, gateway := mikroTikGatewayFixture()
+			route := gatewayv1.HTTPRoute{
+				ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "app"},
+				Spec: gatewayv1.HTTPRouteSpec{
+					CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge"}}},
+					Hostnames:       []gatewayv1.Hostname{hostname},
+				},
+			}
+			if test.mutate != nil {
+				test.mutate(&gatewayClass, &gateway, &route)
+			}
+			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway).Build()
+			reconciler := HTTPRouteReconciler{Client: kube}
+			got, attached, err := reconciler.acceptedHostnamesForMikroTikGateway(context.Background(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if attached != test.attached || !slices.Equal(got, test.want) {
+				t.Fatalf("got hostnames %v attached=%t, want %v attached=%t", got, attached, test.want, test.attached)
+			}
+		})
+	}
+}
+
 func TestAcceptedRouteHostnamesReturnsEffectiveIntersections(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -207,6 +346,8 @@ func TestAcceptedRouteHostnamesReturnsEffectiveIntersections(t *testing.T) {
 		{name: "nested listener wildcard is narrower", listener: pointerTo(gatewayv1.Hostname("*.sub.example.com")), route: []gatewayv1.Hostname{"*.example.com"}, want: []gatewayv1.Hostname{"*.sub.example.com"}},
 		{name: "disjoint wildcards", listener: pointerTo(gatewayv1.Hostname("*.example.com")), route: []gatewayv1.Hostname{"*.example.net"}},
 		{name: "nonmatching exact names", listener: pointerTo(gatewayv1.Hostname("foo.example.com")), route: []gatewayv1.Hostname{"bar.example.com"}},
+		{name: "hostname comparison is case insensitive", listener: pointerTo(gatewayv1.Hostname("FOO.Example.COM")), route: []gatewayv1.Hostname{"foo.example.com"}, want: []gatewayv1.Hostname{"foo.example.com"}},
+		{name: "trailing dots are ignored", listener: pointerTo(gatewayv1.Hostname("foo.example.com.")), route: []gatewayv1.Hostname{"foo.example.com"}, want: []gatewayv1.Hostname{"foo.example.com"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -736,6 +877,92 @@ func TestHTTPRouteSameServiceNameAcrossNamespacesHasUniquePortForwardChildren(t 
 	}
 }
 
+func TestHTTPRouteUngrantedCrossNamespaceBackendIsIgnored(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	gatewayClass, gateway := mikroTikGatewayFixture()
+	otherNamespace := gatewayv1.Namespace("other")
+	portOne := gatewayv1.PortNumber(80)
+	portTwo := gatewayv1.PortNumber(81)
+	route := gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "route",
+			Namespace: "app",
+			UID:       "route-uid",
+			Annotations: map[string]string{
+				api.PublicIPAnnotation:  "198.51.100.10",
+				api.RouterRefAnnotation: "router",
+			},
+		},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge"}}},
+			Rules: []gatewayv1.HTTPRouteRule{{BackendRefs: []gatewayv1.HTTPBackendRef{
+				httpBackendRef("backend", "", portOne),
+				httpBackendRef("backend", otherNamespace, portTwo),
+			}}},
+		},
+	}
+	serviceOne := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"}, Spec: corev1.ServiceSpec{ClusterIP: "10.0.0.10", Ports: []corev1.ServicePort{{Port: 80}}}}
+	serviceTwo := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "other"}, Spec: corev1.ServiceSpec{ClusterIP: "10.0.0.20", Ports: []corev1.ServicePort{{Port: 81}}}}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway, &route, &serviceOne, &serviceTwo, &router, &node).Build()
+	reconciler := HTTPRouteReconciler{Client: kube, Scheme: scheme}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "route")); err != nil {
+		t.Fatal(err)
+	}
+	var forwards api.MikroTikPortForwardList
+	if err := kube.List(context.Background(), &forwards, client.InNamespace("app"), client.MatchingLabels{"mikrotik.operator.io/port-forward-source": shortHash("app/httproute/route")}); err != nil {
+		t.Fatal(err)
+	}
+	if len(forwards.Items) != 1 {
+		t.Fatalf("got %d generated port forwards, want 1 local backend", len(forwards.Items))
+	}
+	got := forwards.Items[0]
+	if got.Spec.ServiceRef == nil || got.Spec.ServiceRef.Namespace != "app" || got.Spec.ServiceRef.Name != "backend" {
+		t.Fatalf("ungranted backend leaked into NAT child: %#v", got.Spec.ServiceRef)
+	}
+	if got.Spec.ExternalPort != 80 {
+		t.Fatalf("external port = %d, want 80 from the granted local backend", got.Spec.ExternalPort)
+	}
+}
+
+func TestHTTPRouteForeignGatewayClassCleansOwnedChildren(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	gatewayClass, gateway := mikroTikGatewayFixture()
+	gateway.Spec.GatewayClassName = "istio"
+	route := gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "app", UID: "route-uid"},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge"}}},
+			Hostnames:       []gatewayv1.Hostname{"app.example.com"},
+		},
+	}
+	record := api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "dns", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/httproute": route.Name}}}
+	forward := api.MikroTikPortForward{ObjectMeta: metav1.ObjectMeta{Name: "forward", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/port-forward-source": shortHash("app/httproute/route")}}}
+	if err := controllerutil.SetControllerReference(&route, &record, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(&route, &forward, scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway, &route, &record, &forward).Build()
+	reconciler := HTTPRouteReconciler{Client: kube, Scheme: scheme}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "route")); err != nil {
+		t.Fatal(err)
+	}
+	assertNotFound(t, kube, &api.MikroTikDNSRecord{}, "app", "dns")
+	assertNotFound(t, kube, &api.MikroTikPortForward{}, "app", "forward")
+}
+
 func ingressRuleForService(host, service string, port int32) networkingv1.IngressRule {
 	return networkingv1.IngressRule{
 		Host: host,
@@ -752,15 +979,15 @@ func ingressRuleForService(host, service string, port int32) networkingv1.Ingres
 
 func mikroTikGatewayFixture() (gatewayv1.GatewayClass, gatewayv1.Gateway) {
 	return gatewayv1.GatewayClass{
-		ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
-		Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
-	}, gatewayv1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
-		Spec: gatewayv1.GatewaySpec{
-			GatewayClassName: api.GatewayClassName,
-			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
-		},
-	}
+			ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
+			Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
+		}, gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: api.GatewayClassName,
+				Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+			},
+		}
 }
 
 func httpBackendRef(name string, namespace gatewayv1.Namespace, port gatewayv1.PortNumber) gatewayv1.HTTPBackendRef {
