@@ -762,6 +762,123 @@ func TestEnsureDNS_AddsWhenMissingAndSkipsWhenMatching(t *testing.T) {
 	}
 }
 
+func TestEnsureDNS_RecreatesOnDriftAndOmitsEmptyTTL(t *testing.T) {
+	comment := ManagedComment("dns", "web", "apps")
+	stored := func(name, address, ttl string) *routeros.Reply {
+		return &routeros.Reply{Re: []*proto.Sentence{{
+			Map: map[string]string{
+				".id":     "*4",
+				"name":    name,
+				"address": address,
+				"ttl":     ttl,
+				"comment": comment,
+			},
+		}}}
+	}
+	tests := []struct {
+		name        string
+		wantName    string
+		wantAddress string
+		wantTTL     string
+		stored      *routeros.Reply
+		wantRemove  bool
+		wantAdd     bool
+		wantTTLArg  bool
+	}{
+		{
+			name:        "hostname drift recreates",
+			wantName:    "new.example.com",
+			wantAddress: "10.0.0.8",
+			wantTTL:     "1h",
+			stored:      stored("old.example.com", "10.0.0.8", "1h"),
+			wantRemove:  true,
+			wantAdd:     true,
+			wantTTLArg:  true,
+		},
+		{
+			name:        "address drift recreates",
+			wantName:    "web.example.com",
+			wantAddress: "10.0.0.9",
+			wantTTL:     "1h",
+			stored:      stored("web.example.com", "10.0.0.8", "1h"),
+			wantRemove:  true,
+			wantAdd:     true,
+			wantTTLArg:  true,
+		},
+		{
+			name:        "ttl drift recreates",
+			wantName:    "web.example.com",
+			wantAddress: "10.0.0.8",
+			wantTTL:     "30m",
+			stored:      stored("web.example.com", "10.0.0.8", "1h"),
+			wantRemove:  true,
+			wantAdd:     true,
+			wantTTLArg:  true,
+		},
+		{
+			name:        "empty TTL matches stored TTL",
+			wantName:    "web.example.com",
+			wantAddress: "10.0.0.8",
+			stored:      stored("web.example.com", "10.0.0.8", "1h"),
+		},
+		{
+			name:        "empty TTL omits ttl on add",
+			wantName:    "web.example.com",
+			wantAddress: "10.0.0.8",
+			stored:      &routeros.Reply{},
+			wantAdd:     true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			responses := []scriptedRouterOSResponse{{reply: test.stored}}
+			if test.wantAdd || test.wantRemove {
+				responses = append(responses, scriptedRouterOSResponse{reply: test.stored})
+				if test.wantRemove {
+					responses = append(responses, scriptedRouterOSResponse{reply: &routeros.Reply{}})
+				}
+				if test.wantAdd {
+					responses = append(responses, scriptedRouterOSResponse{reply: &routeros.Reply{}})
+				}
+			}
+			client := &scriptedRouterOSClient{responses: responses}
+			api := newScriptedAPIClient(t, client)
+			if err := api.EnsureDNS(context.Background(), test.wantName, test.wantAddress, test.wantTTL, comment); err != nil {
+				t.Fatalf("EnsureDNS() error = %v", err)
+			}
+			removed := false
+			added := false
+			for _, call := range client.calls {
+				if len(call) == 0 {
+					continue
+				}
+				if call[0] == "/ip/dns/static/remove" && commandHasArg(call, "=.id=*4") {
+					removed = true
+				}
+				if call[0] == "/ip/dns/static/add" {
+					added = true
+					if !commandHasArg(call, "=name="+test.wantName) || !commandHasArg(call, "=address="+test.wantAddress) {
+						t.Fatalf("add command %v missing name or address", call)
+					}
+					if test.wantTTLArg {
+						if !commandHasArg(call, "=ttl="+test.wantTTL) {
+							t.Fatalf("add command %v missing %s", call, "=ttl="+test.wantTTL)
+						}
+					} else if commandHasArgPrefix(call, "=ttl=") {
+						t.Fatalf("add command %v has unexpected ttl", call)
+					}
+				}
+			}
+			if removed != test.wantRemove {
+				t.Fatalf("removed = %t, want %t; calls=%v", removed, test.wantRemove, client.calls)
+			}
+			if added != test.wantAdd {
+				t.Fatalf("added = %t, want %t; calls=%v", added, test.wantAdd, client.calls)
+			}
+		})
+	}
+}
+
 func TestEnsureFirewallRule_AddsOptionalMatchersAndSkipsWhenMatching(t *testing.T) {
 	comment := ManagedComment("firewall", "web", "apps")
 	empty := &routeros.Reply{}

@@ -18,6 +18,9 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover DNS static-entry drift recreation and empty-TTL matching, Gateway
+  AllowedRoutes/parent attachment, ungranted HTTPRoute backends, foreign
+  GatewayClass child cleanup, and DNS CR deletion sweeping RouterOS.
 
 ## [0.4.0] - 2026-09-01
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
 	ros "github.com/ZeljkoBenovic/mikrotik-operator/internal/routeros"
@@ -517,6 +518,41 @@ func TestDNSReconcilerSkipsClusterRoutesWhenOwnedByService(t *testing.T) {
 	}
 	if routes := ownedRoutes(t, kube, &record); len(routes) != 0 {
 		t.Fatalf("translator-owned DNS created %d cluster routes, want 0", len(routes))
+	}
+}
+
+func TestDNSReconcilerDeletesRouterOSOnDeletion(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	now := metav1.NewTime(time.Now())
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "web",
+			Namespace:         "app",
+			Finalizers:        []string{resourceFinalizer},
+			DeletionTimestamp: &now,
+			Annotations:       map[string]string{durableRouterTargetsAnnotation: "router-a,router-b"},
+		},
+		Spec:   api.MikroTikDNSRecordSpec{Name: "web.home.arpa", Address: "10.0.0.8", RouterRef: "router-b"},
+		Status: api.MikroTikDNSRecordStatus{RouterRef: "router-b", Applied: true},
+	}
+	objects = append(objects, &record)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&record).Build()
+	reconciler := DNSReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
+		t.Fatal(err)
+	}
+	for name, routerClient := range clients {
+		if routerClient.deletedDNS == 0 {
+			t.Fatalf("%s was not cleaned: deletedDNS=%d", name, routerClient.deletedDNS)
+		}
+		if routerClient.ensuredDNS != 0 {
+			t.Fatalf("%s applied DNS during deletion: ensuredDNS=%d", name, routerClient.ensuredDNS)
+		}
+	}
+	var stored api.MikroTikDNSRecord
+	err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored)
+	if err == nil && controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
+		t.Fatal("deletion left the managed-config finalizer")
 	}
 }
 
