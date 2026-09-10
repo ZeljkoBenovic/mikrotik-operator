@@ -151,6 +151,9 @@ func TestServiceDNSReconcilerDeletesRoutesWhenDNSAnnotationRemoved(t *testing.T)
 	if len(ownedRoutes(t, kube, &service)) == 0 {
 		t.Fatal("expected owned route CRs before annotation removal")
 	}
+	if len(ownedDNSRecords(t, kube, &service)) == 0 {
+		t.Fatal("expected owned DNS CRs before annotation removal")
+	}
 
 	var stored corev1.Service
 	if err := kube.Get(context.Background(), types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, &stored); err != nil {
@@ -165,6 +168,9 @@ func TestServiceDNSReconcilerDeletesRoutesWhenDNSAnnotationRemoved(t *testing.T)
 	}
 	if got := ownedRoutes(t, kube, &stored); len(got) != 0 {
 		t.Fatalf("owned route CRs remained after annotation removal: %#v", got)
+	}
+	if got := ownedDNSRecords(t, kube, &stored); len(got) != 0 {
+		t.Fatalf("owned DNS CRs remained after annotation removal: %#v", got)
 	}
 }
 
@@ -364,6 +370,103 @@ func TestIngressReconcilerCreatesOwnedRouteCRsWithoutRouterOS(t *testing.T) {
 	if routes[0].Spec.Destination != "10.0.0.8/32" || routes[0].Spec.Gateway != "192.0.2.10" {
 		t.Fatalf("unexpected route spec: %#v", routes[0].Spec)
 	}
+}
+
+func TestIngressReconcilerCreatesUpdatesAndPrunesOwnedDNSRecords(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	className := api.IngressClassName
+	ingressClass := networkingv1.IngressClass{
+		ObjectMeta: metav1.ObjectMeta{Name: api.IngressClassName},
+		Spec:       networkingv1.IngressClassSpec{Controller: api.IngressController},
+	}
+	ingress := networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app", UID: "ingress-uid"},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: &className,
+			Rules: []networkingv1.IngressRule{{
+				Host: "web.home.arpa",
+				IngressRuleValue: networkingv1.IngressRuleValue{HTTP: &networkingv1.HTTPIngressRuleValue{
+					Paths: []networkingv1.HTTPIngressPath{{
+						Path:     "/",
+						PathType: pointerTo(networkingv1.PathTypePrefix),
+						Backend: networkingv1.IngressBackend{Service: &networkingv1.IngressServiceBackend{
+							Name: "backend",
+							Port: networkingv1.ServiceBackendPort{Number: 80},
+						}},
+					}},
+				}},
+			}},
+		},
+	}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8", Ports: []corev1.ServicePort{{Port: 80}}},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&ingressClass, &ingress, &service, &router, &node).Build()
+	reconciler := IngressReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(ingress.Namespace, ingress.Name)); err != nil {
+		t.Fatal(err)
+	}
+	createdName := "ing-" + shortHash(ingress.Name+"/web.home.arpa/"+service.Name)
+	created := ownedDNSRecords(t, kube, &ingress)
+	if len(created) != 1 || created[0].Name != createdName {
+		t.Fatalf("created DNS = %#v, want %s", created, createdName)
+	}
+	if created[0].Spec.Name != "web.home.arpa" || created[0].Spec.Address != "10.0.0.8" {
+		t.Fatalf("created DNS spec = %#v", created[0].Spec)
+	}
+	if created[0].Spec.ServiceRef == nil || created[0].Spec.ServiceRef.Namespace != service.Namespace || created[0].Spec.ServiceRef.Name != service.Name {
+		t.Fatalf("created DNS serviceRef = %#v", created[0].Spec.ServiceRef)
+	}
+	if created[0].Spec.RouterRef != router.Name {
+		t.Fatalf("created DNS routerRef = %q, want %q", created[0].Spec.RouterRef, router.Name)
+	}
+
+	var storedService corev1.Service
+	if err := kube.Get(context.Background(), types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, &storedService); err != nil {
+		t.Fatal(err)
+	}
+	storedService.Spec.ClusterIP = "10.0.0.9"
+	if err := kube.Update(context.Background(), &storedService); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(ingress.Namespace, ingress.Name)); err != nil {
+		t.Fatal(err)
+	}
+	updated := ownedDNSRecords(t, kube, &ingress)
+	if len(updated) != 1 || updated[0].Name != createdName || updated[0].Spec.Address != "10.0.0.9" {
+		t.Fatalf("updated DNS = %#v, want address 10.0.0.9 on %s", updated, createdName)
+	}
+
+	var storedIngress networkingv1.Ingress
+	if err := kube.Get(context.Background(), types.NamespacedName{Name: ingress.Name, Namespace: ingress.Namespace}, &storedIngress); err != nil {
+		t.Fatal(err)
+	}
+	storedIngress.Spec.Rules[0].Host = "api.home.arpa"
+	if err := kube.Update(context.Background(), &storedIngress); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(ingress.Namespace, ingress.Name)); err != nil {
+		t.Fatal(err)
+	}
+	prunedName := "ing-" + shortHash(ingress.Name+"/api.home.arpa/"+service.Name)
+	pruned := ownedDNSRecords(t, kube, &ingress)
+	if len(pruned) != 1 || pruned[0].Name != prunedName || pruned[0].Spec.Name != "api.home.arpa" {
+		t.Fatalf("pruned DNS = %#v, want %s", pruned, prunedName)
+	}
+	assertNotFound(t, kube, &api.MikroTikDNSRecord{}, ingress.Namespace, createdName)
 }
 
 func TestDNSReconcilerCreatesOwnedRouteCRsForStandaloneServiceRef(t *testing.T) {
@@ -586,6 +689,21 @@ func ownedRoutes(t *testing.T, kube client.Client, owner client.Object) []api.Mi
 	for _, route := range list.Items {
 		if metav1.IsControlledBy(&route, owner) {
 			owned = append(owned, route)
+		}
+	}
+	return owned
+}
+
+func ownedDNSRecords(t *testing.T, kube client.Client, owner client.Object) []api.MikroTikDNSRecord {
+	t.Helper()
+	var list api.MikroTikDNSRecordList
+	if err := kube.List(context.Background(), &list, client.InNamespace(owner.GetNamespace())); err != nil {
+		t.Fatal(err)
+	}
+	owned := make([]api.MikroTikDNSRecord, 0)
+	for _, record := range list.Items {
+		if metav1.IsControlledBy(&record, owner) {
+			owned = append(owned, record)
 		}
 	}
 	return owned
