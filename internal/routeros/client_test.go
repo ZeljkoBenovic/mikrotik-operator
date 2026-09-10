@@ -571,6 +571,111 @@ func TestEnsurePortForward_SetsDstAddressOnDstNat(t *testing.T) {
 	}
 }
 
+func TestEnsurePortForward_RecreatesOnDriftAndSkipsWhenMatching(t *testing.T) {
+	comment := ManagedComment("portforward", "web", "apps")
+	matchingNAT := func(target string) *routeros.Reply {
+		return &routeros.Reply{Re: []*proto.Sentence{
+			{Map: map[string]string{
+				".id":          "*1",
+				"chain":        "dstnat",
+				"protocol":     "tcp",
+				"dst-port":     "80",
+				"action":       "dst-nat",
+				"to-addresses": target,
+				"to-ports":     "8080",
+				"dst-address":  "198.51.100.10",
+				"comment":      comment + "/dstnat",
+			}},
+			{Map: map[string]string{
+				".id":         "*2",
+				"chain":       "srcnat",
+				"dst-address": target,
+				"action":      "masquerade",
+				"comment":     comment + "/srcnat",
+			}},
+		}}
+	}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: matchingNAT("10.0.0.9")},
+			{reply: matchingNAT("10.0.0.9")},
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+			{reply: matchingNAT("10.0.0.10")},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+	forward := PortForward{
+		Protocol:     "tcp",
+		ExternalPort: 80,
+		Target:       "10.0.0.10",
+		TargetPort:   8080,
+		PublicIP:     "198.51.100.10",
+	}
+
+	if err := api.EnsurePortForward(context.Background(), forward, comment); err != nil {
+		t.Fatalf("EnsurePortForward() recreate error = %v", err)
+	}
+	removed := map[string]bool{}
+	addedDst := false
+	addedSrc := false
+	for _, call := range client.calls {
+		if len(call) == 0 {
+			continue
+		}
+		switch call[0] {
+		case "/ip/firewall/nat/remove":
+			if commandHasArg(call, "=.id=*1") {
+				removed["*1"] = true
+			}
+			if commandHasArg(call, "=.id=*2") {
+				removed["*2"] = true
+			}
+		case "/ip/firewall/nat/add":
+			switch {
+			case commandHasArg(call, "=chain=dstnat"):
+				addedDst = true
+				for _, arg := range []string{
+					"=protocol=tcp",
+					"=dst-port=80",
+					"=to-addresses=10.0.0.10",
+					"=to-ports=8080",
+					"=dst-address=198.51.100.10",
+					"=comment=" + comment + "/dstnat",
+				} {
+					if !commandHasArg(call, arg) {
+						t.Fatalf("dst-nat recreate missing %s: %v", arg, call)
+					}
+				}
+			case commandHasArg(call, "=chain=srcnat"):
+				addedSrc = true
+				if !commandHasArg(call, "=dst-address=10.0.0.10") || !commandHasArg(call, "=action=masquerade") {
+					t.Fatalf("src-nat recreate missing return-path args: %v", call)
+				}
+			}
+		}
+	}
+	if !removed["*1"] || !removed["*2"] {
+		t.Fatalf("drifted NAT ids removed = %#v, want *1 and *2", removed)
+	}
+	if !addedDst || !addedSrc {
+		t.Fatal("replacement NAT rules were not added")
+	}
+
+	if err := api.EnsurePortForward(context.Background(), forward, comment); err != nil {
+		t.Fatalf("EnsurePortForward() skip error = %v", err)
+	}
+	if len(client.calls) != 8 {
+		t.Fatalf("matching NAT command count = %d, want 8", len(client.calls))
+	}
+	if client.calls[7][0] != "/ip/firewall/nat/print" {
+		t.Fatalf("matching NAT issued %v", client.calls[7])
+	}
+}
+
 func TestEnsurePortForward_OmitsDstAddressWhenEmpty(t *testing.T) {
 	comment := ManagedComment("portforward", "web", "apps")
 	empty := &routeros.Reply{}
@@ -759,6 +864,180 @@ func TestEnsureDNS_AddsWhenMissingAndSkipsWhenMatching(t *testing.T) {
 	}
 	if client.calls[3][0] != "/ip/dns/static/print" {
 		t.Fatalf("matching record issued %v", client.calls[3])
+	}
+}
+
+func TestEnsureFirewallRule_RecreatesOnMatcherDrift(t *testing.T) {
+	comment := ManagedComment("firewall", "web", "apps")
+	rule := FirewallRule{
+		Chain:              "forward",
+		Action:             "accept",
+		Protocol:           "tcp",
+		SourceAddress:      "10.0.0.0/24",
+		DestinationAddress: "10.0.0.10",
+		SourcePort:         "1024-65535",
+		DestinationPort:    "443",
+		InInterface:        "ether1",
+		OutInterface:       "bridge",
+		ConnectionState:    []string{"new"},
+		ConnectionNatState: []string{"dstnat"},
+		LogPrefix:          "web",
+	}
+	matching := func(dstAddress string) *routeros.Reply {
+		return &routeros.Reply{Re: []*proto.Sentence{{
+			Map: map[string]string{
+				".id":                  "*4",
+				"chain":                rule.Chain,
+				"action":               rule.Action,
+				"protocol":             rule.Protocol,
+				"src-address":          rule.SourceAddress,
+				"dst-address":          dstAddress,
+				"src-port":             rule.SourcePort,
+				"dst-port":             rule.DestinationPort,
+				"in-interface":         rule.InInterface,
+				"out-interface":        rule.OutInterface,
+				"connection-state":     "new",
+				"connection-nat-state": "dstnat",
+				"log-prefix":           rule.LogPrefix,
+				"comment":              comment,
+			},
+		}}}
+	}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: matching("10.0.0.11")},
+			{reply: matching("10.0.0.11")},
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+			{reply: matching("10.0.0.10")},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	if err := api.EnsureFirewallRule(context.Background(), rule, comment); err != nil {
+		t.Fatalf("EnsureFirewallRule() recreate error = %v", err)
+	}
+	removed := false
+	added := false
+	for _, call := range client.calls[:4] {
+		if len(call) == 0 {
+			continue
+		}
+		if call[0] == "/ip/firewall/filter/remove" && commandHasArg(call, "=.id=*4") {
+			removed = true
+		}
+		if call[0] == "/ip/firewall/filter/add" {
+			added = true
+			for _, arg := range []string{
+				"=chain=forward",
+				"=action=accept",
+				"=protocol=tcp",
+				"=src-address=10.0.0.0/24",
+				"=dst-address=10.0.0.10",
+				"=src-port=1024-65535",
+				"=dst-port=443",
+				"=in-interface=ether1",
+				"=out-interface=bridge",
+				"=connection-state=new",
+				"=connection-nat-state=dstnat",
+				"=log-prefix=web",
+				"=comment=" + comment,
+			} {
+				if !commandHasArg(call, arg) {
+					t.Fatalf("recreate add missing %s: %v", arg, call)
+				}
+			}
+		}
+	}
+	if !removed {
+		t.Fatal("drifted firewall rule was not removed")
+	}
+	if !added {
+		t.Fatal("replacement firewall rule was not added")
+	}
+
+	if err := api.EnsureFirewallRule(context.Background(), rule, comment); err != nil {
+		t.Fatalf("EnsureFirewallRule() skip error = %v", err)
+	}
+	if len(client.calls) != 5 {
+		t.Fatalf("matching rule command count = %d, want 5", len(client.calls))
+	}
+	if client.calls[4][0] != "/ip/firewall/filter/print" {
+		t.Fatalf("matching rule issued %v", client.calls[4])
+	}
+}
+
+func TestEnsureFirewallRule_PlaceBeforeSkipsWhenFirstAndRecreatesWhenNot(t *testing.T) {
+	comment := ManagedComment("firewall", "web", "apps")
+	rule := FirewallRule{
+		Chain:       "forward",
+		Action:      "accept",
+		PlaceBefore: true,
+	}
+	managed := map[string]string{
+		".id":     "*2",
+		"chain":   rule.Chain,
+		"action":  rule.Action,
+		"comment": comment,
+	}
+	alreadyFirst := &routeros.Reply{Re: []*proto.Sentence{
+		{Map: managed},
+		{Map: map[string]string{".id": "*9", "chain": "forward", "comment": "drop"}},
+	}}
+	behindUnmanaged := &routeros.Reply{Re: []*proto.Sentence{
+		{Map: map[string]string{".id": "*1", "chain": "forward", "comment": "drop"}},
+		{Map: managed},
+	}}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: alreadyFirst},
+			{reply: alreadyFirst},
+			{reply: behindUnmanaged},
+			{reply: behindUnmanaged},
+			{reply: behindUnmanaged},
+			{reply: &routeros.Reply{}},
+			{reply: behindUnmanaged},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	if err := api.EnsureFirewallRule(context.Background(), rule, comment); err != nil {
+		t.Fatalf("EnsureFirewallRule() already-first error = %v", err)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("already-first command count = %d, want 2", len(client.calls))
+	}
+	for _, call := range client.calls {
+		if len(call) > 0 && (call[0] == "/ip/firewall/filter/remove" || call[0] == "/ip/firewall/filter/add") {
+			t.Fatalf("already-first rule mutated RouterOS: %v", call)
+		}
+	}
+
+	if err := api.EnsureFirewallRule(context.Background(), rule, comment); err != nil {
+		t.Fatalf("EnsureFirewallRule() reorder error = %v", err)
+	}
+	removed := false
+	placed := false
+	for _, call := range client.calls[2:] {
+		if len(call) == 0 {
+			continue
+		}
+		if call[0] == "/ip/firewall/filter/remove" && commandHasArg(call, "=.id=*2") {
+			removed = true
+		}
+		if call[0] == "/ip/firewall/filter/add" {
+			if !commandHasArg(call, "=place-before=*1") {
+				t.Fatalf("reorder add missing place-before=*1: %v", call)
+			}
+			placed = true
+		}
+	}
+	if !removed {
+		t.Fatal("misordered firewall rule was not removed")
+	}
+	if !placed {
+		t.Fatal("replacement firewall rule was not placed before the unmanaged rule")
 	}
 }
 

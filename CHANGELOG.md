@@ -14,6 +14,9 @@ and the project follows semantic versioning.
 
 ### Tests
 
+- Cover Ingress-generated DNS create/update/prune, Service DNS leftover cleanup
+  when the DNS annotation is removed, RouterOS NAT recreate-on-drift, and
+  firewall matcher drift plus PlaceBefore reorder.
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
