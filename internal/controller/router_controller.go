@@ -800,6 +800,9 @@ func (s *ServiceDNSReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 		}
 	}
 	if address == "" || address == corev1.ClusterIPNone {
+		if err := s.cleanupGeneratedChildren(ctx, &service, nil); err != nil {
+			return reconcile.Result{}, err
+		}
 		return reconcile.Result{RequeueAfter: time.Minute}, nil
 	}
 	name := service.Name + "-dns"

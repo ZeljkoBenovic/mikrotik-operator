@@ -300,6 +300,83 @@ func TestServiceDNSReconcilerCleansGeneratedChildrenWhenPublicIPRouterIsAmbiguou
 	assertNotFound(t, kube, &api.MikroTikPortForward{}, forward.Namespace, forward.Name)
 }
 
+func TestServiceDNSReconcilerCleansGeneratedChildrenWhenServiceIsNotAddressable(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		service corev1.ServiceSpec
+	}{
+		{
+			name: "external name",
+			service: corev1.ServiceSpec{
+				Type:         corev1.ServiceTypeExternalName,
+				ExternalName: "external.example.com",
+			},
+		},
+		{
+			name: "headless cluster IP",
+			service: corev1.ServiceSpec{
+				Type:      corev1.ServiceTypeClusterIP,
+				ClusterIP: corev1.ClusterIPNone,
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			scheme := controllerTestScheme(t)
+			service := corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "web",
+					Namespace: "app",
+					UID:       "service-uid",
+					Annotations: map[string]string{
+						api.DNSNameAnnotation:  "web.home.arpa",
+						api.PublicIPAnnotation: "203.0.113.10",
+					},
+				},
+				Spec: test.service,
+			}
+			service.Spec.Ports = []corev1.ServicePort{{Name: "http", Port: 80}}
+			router := api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+				Spec: api.MikroTikRouterSpec{
+					Address:           "192.0.2.1",
+					CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+				},
+			}
+			record := api.MikroTikDNSRecord{
+				ObjectMeta: metav1.ObjectMeta{Name: "web-dns", Namespace: service.Namespace},
+				Spec:       api.MikroTikDNSRecordSpec{Name: "web.home.arpa", Address: "10.0.0.8"},
+			}
+			if err := controllerutil.SetControllerReference(&service, &record, scheme); err != nil {
+				t.Fatal(err)
+			}
+			leftover := api.MikroTikRoute{
+				ObjectMeta: metav1.ObjectMeta{Name: "rt-leftover", Namespace: service.Namespace},
+				Spec:       api.MikroTikRouteSpec{Destination: "10.0.0.8/32", Gateway: "192.0.2.10"},
+			}
+			if err := controllerutil.SetControllerReference(&service, &leftover, scheme); err != nil {
+				t.Fatal(err)
+			}
+			forward := api.MikroTikPortForward{
+				ObjectMeta: metav1.ObjectMeta{Name: "pf-leftover", Namespace: service.Namespace},
+				Spec:       api.MikroTikPortForwardSpec{Protocol: "tcp", ExternalPort: 80, TargetPort: 80, TargetAddress: "10.0.0.8"},
+			}
+			if err := controllerutil.SetControllerReference(&service, &forward, scheme); err != nil {
+				t.Fatal(err)
+			}
+			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &router, &record, &leftover, &forward).Build()
+			reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+			if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(service.Namespace, service.Name)); err != nil {
+				t.Fatal(err)
+			}
+			assertNotFound(t, kube, &api.MikroTikDNSRecord{}, record.Namespace, record.Name)
+			assertNotFound(t, kube, &api.MikroTikRoute{}, leftover.Namespace, leftover.Name)
+			assertNotFound(t, kube, &api.MikroTikPortForward{}, forward.Namespace, forward.Name)
+		})
+	}
+}
+
 func TestIngressReconcilerCreatesOwnedRouteCRsWithoutRouterOS(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	className := api.IngressClassName

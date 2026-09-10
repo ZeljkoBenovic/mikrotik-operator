@@ -7,6 +7,12 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Annotated Services that become ExternalName or headless now delete their
+  owned DNS, route, and port-forward children instead of leaving RouterOS
+  entries pointed at a released ClusterIP.
+
 ### Added
 
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
