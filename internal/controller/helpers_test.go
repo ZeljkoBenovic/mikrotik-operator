@@ -485,6 +485,54 @@ func TestAppendUniqueServicePort(t *testing.T) {
 	}
 }
 
+func TestValidateGeneratedDNSCandidates(t *testing.T) {
+	sameService := types.NamespacedName{Namespace: "app", Name: "web"}
+	otherService := types.NamespacedName{Namespace: "app", Name: "api"}
+	tests := []struct {
+		name       string
+		candidates []generatedDNSCandidate
+		wantErr    bool
+	}{
+		{
+			name: "duplicate paths to the same backend are allowed",
+			candidates: []generatedDNSCandidate{
+				{hostname: "web.example.com", service: sameService, address: "10.0.0.8"},
+				{hostname: "web.example.com", service: sameService, address: "10.0.0.8"},
+			},
+		},
+		{
+			name: "case and trailing-dot still collide across services",
+			candidates: []generatedDNSCandidate{
+				{hostname: "Web.Example.com.", service: sameService, address: "10.0.0.8"},
+				{hostname: "web.example.com", service: otherService, address: "10.0.0.9"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "headless and empty hostnames are skipped",
+			candidates: []generatedDNSCandidate{
+				{hostname: "", service: sameService, address: "10.0.0.8"},
+				{hostname: "web.example.com", service: sameService, address: corev1.ClusterIPNone},
+				{hostname: "web.example.com", service: otherService, address: "10.0.0.9"},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateGeneratedDNSCandidates("Ingress app/web", test.candidates)
+			if test.wantErr {
+				if !errors.Is(err, errGeneratedChildAmbiguity) {
+					t.Fatalf("error = %v, want generated-child ambiguity", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestPortForwardDestinationAddress(t *testing.T) {
 	tests := []struct {
 		name  string

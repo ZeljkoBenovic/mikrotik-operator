@@ -14,6 +14,9 @@ and the project follows semantic versioning.
 
 ### Tests
 
+- Cover RouterOS DNS/NAT/filter delete isolation, unmanaged static DNS
+  coexistence, Ingress hostname normalization collisions, same-host multi-path
+  Ingress backends, and the no-public-ip generated-NAT skip.
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name

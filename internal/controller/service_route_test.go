@@ -48,6 +48,9 @@ func TestServiceDNSReconcilerCreatesOwnedRouteCRsWithoutRouterOS(t *testing.T) {
 	if route.Spec.Gateway != "192.0.2.10" {
 		t.Fatalf("gateway %q, want 192.0.2.10", route.Spec.Gateway)
 	}
+	if forwards := ownedPortForwards(t, kube, &service); len(forwards) != 0 {
+		t.Fatalf("dns-name without public-ip created %d port-forwards, want 0", len(forwards))
+	}
 	if route.Spec.RouterRef != router.Name {
 		t.Fatalf("routerRef %q, want %q", route.Spec.RouterRef, router.Name)
 	}
@@ -364,6 +367,79 @@ func TestIngressReconcilerCreatesOwnedRouteCRsWithoutRouterOS(t *testing.T) {
 	if routes[0].Spec.Destination != "10.0.0.8/32" || routes[0].Spec.Gateway != "192.0.2.10" {
 		t.Fatalf("unexpected route spec: %#v", routes[0].Spec)
 	}
+	if forwards := ownedPortForwards(t, kube, &ingress); len(forwards) != 0 {
+		t.Fatalf("Ingress without public-ip created %d port-forwards, want 0", len(forwards))
+	}
+}
+
+func TestIngressReconcilerAllowsSameHostMultiplePathsToSameService(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	className := api.IngressClassName
+	ingressClass := networkingv1.IngressClass{
+		ObjectMeta: metav1.ObjectMeta{Name: api.IngressClassName},
+		Spec:       networkingv1.IngressClassSpec{Controller: api.IngressController},
+	}
+	path := func(path string, port int32) networkingv1.HTTPIngressPath {
+		return networkingv1.HTTPIngressPath{
+			Path:     path,
+			PathType: pointerTo(networkingv1.PathTypePrefix),
+			Backend: networkingv1.IngressBackend{Service: &networkingv1.IngressServiceBackend{
+				Name: "backend",
+				Port: networkingv1.ServiceBackendPort{Number: port},
+			}},
+		}
+	}
+	ingress := networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app", UID: "ingress-uid"},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: &className,
+			Rules: []networkingv1.IngressRule{{
+				Host: "web.home.arpa",
+				IngressRuleValue: networkingv1.IngressRuleValue{HTTP: &networkingv1.HTTPIngressRuleValue{
+					Paths: []networkingv1.HTTPIngressPath{path("/", 80), path("/api", 80)},
+				}},
+			}},
+		},
+	}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8", Ports: []corev1.ServicePort{{Port: 80}}},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&ingressClass, &ingress, &service, &router, &node).Build()
+	reconciler := IngressReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(ingress.Namespace, ingress.Name)); err != nil {
+		t.Fatal(err)
+	}
+	var records api.MikroTikDNSRecordList
+	if err := kube.List(context.Background(), &records, client.InNamespace(ingress.Namespace)); err != nil {
+		t.Fatal(err)
+	}
+	owned := 0
+	for _, record := range records.Items {
+		if metav1.IsControlledBy(&record, &ingress) {
+			owned++
+			if record.Spec.Name != "web.home.arpa" || record.Spec.Address != "10.0.0.8" {
+				t.Fatalf("unexpected DNS spec: %#v", record.Spec)
+			}
+		}
+	}
+	if owned != 1 {
+		t.Fatalf("owned DNS records = %d, want 1 for the shared hostname", owned)
+	}
+	if routes := ownedRoutes(t, kube, &ingress); len(routes) != 1 {
+		t.Fatalf("owned routes = %d, want 1", len(routes))
+	}
 }
 
 func TestDNSReconcilerCreatesOwnedRouteCRsForStandaloneServiceRef(t *testing.T) {
@@ -574,6 +650,21 @@ func reconcileServiceUntil(t *testing.T, reconciler ServiceDNSReconciler, servic
 		}
 	}
 	return nil
+}
+
+func ownedPortForwards(t *testing.T, kube client.Client, owner client.Object) []api.MikroTikPortForward {
+	t.Helper()
+	var list api.MikroTikPortForwardList
+	if err := kube.List(context.Background(), &list, client.InNamespace(owner.GetNamespace())); err != nil {
+		t.Fatal(err)
+	}
+	owned := make([]api.MikroTikPortForward, 0)
+	for _, forward := range list.Items {
+		if metav1.IsControlledBy(&forward, owner) {
+			owned = append(owned, forward)
+		}
+	}
+	return owned
 }
 
 func ownedRoutes(t *testing.T, kube client.Client, owner client.Object) []api.MikroTikRoute {

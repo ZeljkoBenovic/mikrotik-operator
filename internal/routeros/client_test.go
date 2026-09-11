@@ -1095,6 +1095,113 @@ func TestEnsureRoutes_RemovesStalePrefixMatchesAndKeepsDesired(t *testing.T) {
 	}
 }
 
+func TestDeleteDNS_RemovesExactCommentOnly(t *testing.T) {
+	comment := ManagedComment("dns", "web", "apps")
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: &routeros.Reply{Re: []*proto.Sentence{
+				{Map: map[string]string{".id": "*1", "comment": comment}},
+				{Map: map[string]string{".id": "*2", "comment": ManagedComment("dns", "other", "apps")}},
+				{Map: map[string]string{".id": "*3", "comment": "user-static"}},
+			}}},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+	if err := api.DeleteDNS(context.Background(), comment); err != nil {
+		t.Fatalf("DeleteDNS() error = %v", err)
+	}
+	removed := removeIDs(client.calls)
+	if want := []string{"*1"}; !stringSliceEqual(removed, want) {
+		t.Fatalf("removed ids = %v, want %v", removed, want)
+	}
+}
+
+func TestDeletePortForward_RemovesPrefixedNATOnly(t *testing.T) {
+	comment := ManagedComment("portforward", "web", "apps")
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: &routeros.Reply{Re: []*proto.Sentence{
+				{Map: map[string]string{".id": "*1", "comment": comment + "/dstnat"}},
+				{Map: map[string]string{".id": "*2", "comment": comment + "/srcnat"}},
+				{Map: map[string]string{".id": "*3", "comment": ManagedComment("portforward", "web2", "apps") + "/dstnat"}},
+				{Map: map[string]string{".id": "*4", "comment": "user-dstnat"}},
+			}}},
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+	if err := api.DeletePortForward(context.Background(), comment); err != nil {
+		t.Fatalf("DeletePortForward() error = %v", err)
+	}
+	removed := removeIDs(client.calls)
+	if want := []string{"*1", "*2"}; !stringSliceEqual(removed, want) {
+		t.Fatalf("removed ids = %v, want %v", removed, want)
+	}
+}
+
+func TestDeleteFirewallRule_RemovesExactCommentOnly(t *testing.T) {
+	comment := ManagedComment("firewall", "web", "apps")
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: &routeros.Reply{Re: []*proto.Sentence{
+				{Map: map[string]string{".id": "*1", "comment": comment}},
+				{Map: map[string]string{".id": "*2", "comment": ManagedComment("firewall", "other", "apps")}},
+				{Map: map[string]string{".id": "*3", "comment": "user-filter"}},
+			}}},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+	if err := api.DeleteFirewallRule(context.Background(), comment); err != nil {
+		t.Fatalf("DeleteFirewallRule() error = %v", err)
+	}
+	removed := removeIDs(client.calls)
+	if want := []string{"*1"}; !stringSliceEqual(removed, want) {
+		t.Fatalf("removed ids = %v, want %v", removed, want)
+	}
+}
+
+func TestEnsureDNS_LeavesUnmanagedStaticEntriesWithSameName(t *testing.T) {
+	comment := ManagedComment("dns", "web", "apps")
+	unmanaged := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{
+			".id":     "*9",
+			"name":    "web.example.com",
+			"address": "198.51.100.10",
+			"comment": "user-static",
+		},
+	}}}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: unmanaged},
+			{reply: unmanaged},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+	if err := api.EnsureDNS(context.Background(), "web.example.com", "10.0.0.8", "", comment); err != nil {
+		t.Fatalf("EnsureDNS() error = %v", err)
+	}
+	if removed := removeIDs(client.calls); len(removed) != 0 {
+		t.Fatalf("removed unmanaged ids = %v, want none", removed)
+	}
+	added := false
+	for _, call := range client.calls {
+		if len(call) == 0 || call[0] != "/ip/dns/static/add" {
+			continue
+		}
+		added = true
+		if !commandHasArg(call, "=name=web.example.com") || !commandHasArg(call, "=address=10.0.0.8") {
+			t.Fatalf("add command = %v, want managed static entry", call)
+		}
+	}
+	if !added {
+		t.Fatal("managed DNS record was not added beside the unmanaged entry")
+	}
+}
+
 func TestDeleteRoute_RemovesExactCommentOnly(t *testing.T) {
 	comment := ManagedComment("route", "web", "apps")
 	client := &scriptedRouterOSClient{
