@@ -94,6 +94,40 @@ describe('form conversion', () => {
       spec: { podRef: { namespace: 'app', name: 'web-0' }, protocol: 'tcp' },
     } as ResourceObject)
     expect(fromResource.spec.targetType).toBe('pod')
+
+    const fromService = formFromResource(forwards, {
+      metadata: { name: 'web', namespace: 'app' },
+      spec: { serviceRef: { namespace: 'app', name: 'web' }, protocol: 'tcp' },
+    } as ResourceObject)
+    expect(fromService.spec.targetType).toBe('service')
+
+    const serviceWithAddress = formFromResource(forwards, {
+      metadata: { name: 'web', namespace: 'app' },
+      spec: {
+        serviceRef: { namespace: 'app', name: 'web' },
+        targetAddress: '10.0.0.8',
+        protocol: 'tcp',
+      },
+    } as ResourceObject)
+    expect(serviceWithAddress.spec.targetType).toBe('address')
+
+    const fromPod = resourceFromForm(forwards, {
+      name: 'web',
+      namespace: 'app',
+      spec: {
+        targetType: 'pod',
+        targetAddress: '10.0.0.8',
+        serviceRef: { namespace: 'app', name: 'web' },
+        podRef: { namespace: 'app', name: 'web-0' },
+        protocol: 'tcp',
+        routerRef: 'edge',
+        externalPort: 80,
+        targetPort: 80,
+      },
+    })
+    expect(fromPod.spec.targetAddress).toBeUndefined()
+    expect(fromPod.spec.serviceRef).toBeUndefined()
+    expect(fromPod.spec.podRef).toEqual({ namespace: 'app', name: 'web-0' })
   })
 
   it('detects single vs multi router mode from the resource', () => {
