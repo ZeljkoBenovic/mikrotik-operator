@@ -171,3 +171,56 @@ func TestRouterReconcilerSweepsRemovedEndpoints(t *testing.T) {
 		t.Fatalf("applied endpoints = %#v, want only %s", stored.Status.AppliedEndpoints, current.Address)
 	}
 }
+
+func TestRouterReconcilerCompactsRemovedEndpointWhenSecretIsGone(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	current := api.RouterEndpoint{
+		Name:              "keep",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "current-credentials"},
+	}
+	removed := api.RouterEndpoint{
+		Name:              "gone",
+		Address:           "192.0.2.11",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "removed-credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{current}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{current, removed}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "current-credentials", Namespace: "app"}}
+	dials := 0
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret).
+		WithStatusSubresource(&router).
+		Build()
+	reconciler := RouterReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Factory: func(_ context.Context, address string, _ int32, _ bool, _, _ string) (ros.Client, error) {
+			dials++
+			if address == removed.Address {
+				t.Fatalf("removed endpoint %s was dialed after its secret was deleted", address)
+			}
+			return &recordingRouterClient{}, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(router.Namespace, router.Name)); err != nil {
+		t.Fatal(err)
+	}
+	var stored api.MikroTikRouter
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: router.Namespace, Name: router.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Status.AppliedEndpoints) != 1 || stored.Status.AppliedEndpoints[0].Address != current.Address {
+		t.Fatalf("applied endpoints = %#v, want only %s", stored.Status.AppliedEndpoints, current.Address)
+	}
+	if err := ensureRouterActive(context.Background(), kube, stored); err != nil {
+		t.Fatalf("missing removed-endpoint secret left the router inactive: %v", err)
+	}
+	if dials != 0 {
+		t.Fatalf("RouterOS was contacted %d times while compacting an unreachable removed endpoint", dials)
+	}
+}

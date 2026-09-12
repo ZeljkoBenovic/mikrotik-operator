@@ -199,6 +199,12 @@ func (r *RouterReconciler) cleanupRemovedEndpoints(ctx context.Context, router a
 		oldRouter.Spec.Address = ""
 		connections, err := connectRouterClients(ctx, r.Client, r.Factory, oldRouter)
 		if err != nil {
+			if apierrors.IsNotFound(err) {
+				// The removed endpoint's credentials are gone, so this device
+				// can never be cleaned. Drop it from history so the current
+				// endpoints can become active.
+				continue
+			}
 			return err
 		}
 		defer closeRouterConnections(ctx, connections)
