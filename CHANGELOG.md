@@ -7,6 +7,13 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Replacing a `MikroTikRouter` endpoint no longer leaves the router inactive
+  when the removed endpoint's credentials Secret is already gone. Cleanup
+  drops that unreachable history entry so child DNS, NAT, route, and firewall
+  writes can target the current device.
+
 ### Added
 
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
