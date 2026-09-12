@@ -18,6 +18,9 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover generated NAT candidate selection (selected Ingress ports, empty
+  protocol, headless skip, NodePort allocation, public-match collisions),
+  unowned generated DNS/NAT name collisions, and hostless Ingress DNS skip.
 
 ## [0.4.0] - 2026-09-01
 

@@ -366,6 +366,89 @@ func TestIngressReconcilerCreatesOwnedRouteCRsWithoutRouterOS(t *testing.T) {
 	}
 }
 
+func TestIngressReconcilerSkipsDNSForHostlessRules(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	className := api.IngressClassName
+	ingressClass := networkingv1.IngressClass{
+		ObjectMeta: metav1.ObjectMeta{Name: api.IngressClassName},
+		Spec:       networkingv1.IngressClassSpec{Controller: api.IngressController},
+	}
+	ingress := networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app", UID: "ingress-uid"},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: &className,
+			Rules: []networkingv1.IngressRule{{
+				IngressRuleValue: networkingv1.IngressRuleValue{HTTP: &networkingv1.HTTPIngressRuleValue{
+					Paths: []networkingv1.HTTPIngressPath{{
+						Path:     "/",
+						PathType: pointerTo(networkingv1.PathTypePrefix),
+						Backend: networkingv1.IngressBackend{Service: &networkingv1.IngressServiceBackend{
+							Name: "backend",
+							Port: networkingv1.ServiceBackendPort{Number: 80},
+						}},
+					}},
+				}},
+			}},
+		},
+	}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8", Ports: []corev1.ServicePort{{Port: 80}}},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&ingressClass, &ingress, &service, &router, &node).Build()
+	reconciler := IngressReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(ingress.Namespace, ingress.Name)); err != nil {
+		t.Fatal(err)
+	}
+	var records api.MikroTikDNSRecordList
+	if err := kube.List(context.Background(), &records, client.InNamespace(ingress.Namespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(records.Items) != 0 {
+		t.Fatalf("hostless Ingress created DNS children: %#v", records.Items)
+	}
+	routes := ownedRoutes(t, kube, &ingress)
+	if len(routes) != 1 {
+		t.Fatalf("owned routes = %d, want 1 for the backend Service", len(routes))
+	}
+}
+
+func TestServiceDNSReconcilerRejectsUnownedGeneratedDNSName(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service, router, node := annotatedClusterIPFixture()
+	unowned := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{Name: service.Name + "-dns", Namespace: service.Namespace},
+		Spec:       api.MikroTikDNSRecordSpec{Name: "user.home.arpa", Address: "10.0.0.99"},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &router, &node, &unowned).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	err := reconcileServiceUntil(t, reconciler, service)
+	if !errors.Is(err, errGeneratedChildCollision) {
+		t.Fatalf("error = %v, want generated-child collision", err)
+	}
+	var stored api.MikroTikDNSRecord
+	if getErr := kube.Get(context.Background(), types.NamespacedName{Name: unowned.Name, Namespace: unowned.Namespace}, &stored); getErr != nil {
+		t.Fatal(getErr)
+	}
+	if stored.Spec.Name != "user.home.arpa" || stored.Spec.Address != "10.0.0.99" || metav1.IsControlledBy(&stored, &service) {
+		t.Fatalf("unowned DNS record was mutated: %#v", stored)
+	}
+	if routes := ownedRoutes(t, kube, &service); len(routes) != 0 {
+		t.Fatalf("owned routes created despite DNS name collision: %#v", routes)
+	}
+}
+
 func TestDNSReconcilerCreatesOwnedRouteCRsForStandaloneServiceRef(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	endpoint := api.RouterEndpoint{Name: "primary", Address: "192.0.2.1", CredentialsSecret: corev1.LocalObjectReference{Name: "creds"}}
