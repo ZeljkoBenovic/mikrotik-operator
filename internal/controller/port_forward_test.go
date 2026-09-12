@@ -540,12 +540,21 @@ func TestReconcileServicePortForwardsHonorsSelectedPortsAndPrunesStale(t *testin
 	}); err != nil {
 		t.Fatal(err)
 	}
-	forwards := ownedPortForwards(t, kube, &service)
-	if len(forwards) != 1 {
-		t.Fatalf("owned port forwards = %d, want 1 selected backend port", len(forwards))
+	var list api.MikroTikPortForwardList
+	if err := kube.List(context.Background(), &list, client.InNamespace(service.Namespace)); err != nil {
+		t.Fatal(err)
 	}
-	if forwards[0].Spec.ExternalPort != 80 || forwards[0].Spec.Protocol != "tcp" {
-		t.Fatalf("unexpected selected port forward: %#v", forwards[0].Spec)
+	owned := make([]api.MikroTikPortForward, 0)
+	for _, forward := range list.Items {
+		if metav1.IsControlledBy(&forward, &service) {
+			owned = append(owned, forward)
+		}
+	}
+	if len(owned) != 1 {
+		t.Fatalf("owned port forwards = %d, want 1 selected backend port", len(owned))
+	}
+	if owned[0].Spec.ExternalPort != 80 || owned[0].Spec.Protocol != "tcp" {
+		t.Fatalf("unexpected selected port forward: %#v", owned[0].Spec)
 	}
 	assertNotFound(t, kube, &api.MikroTikPortForward{}, "app", staleName)
 }
@@ -585,19 +594,4 @@ func TestReconcileServicePortForwardsRejectsUnownedNameCollision(t *testing.T) {
 	if stored.Spec.Protocol != "udp" || stored.Spec.TargetAddress != "10.0.0.99" || metav1.IsControlledBy(&stored, &service) {
 		t.Fatalf("unowned port forward was mutated: %#v", stored)
 	}
-}
-
-func ownedPortForwards(t *testing.T, kube client.Client, owner client.Object) []api.MikroTikPortForward {
-	t.Helper()
-	var list api.MikroTikPortForwardList
-	if err := kube.List(context.Background(), &list, client.InNamespace(owner.GetNamespace())); err != nil {
-		t.Fatal(err)
-	}
-	owned := make([]api.MikroTikPortForward, 0)
-	for _, forward := range list.Items {
-		if metav1.IsControlledBy(&forward, owner) {
-			owned = append(owned, forward)
-		}
-	}
-	return owned
 }
