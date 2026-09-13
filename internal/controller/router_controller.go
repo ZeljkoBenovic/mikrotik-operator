@@ -360,11 +360,11 @@ func (d *DNSReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 	comment := ros.ManagedComment("dns", o.Name, o.Namespace)
 	address := o.Spec.Address
 	var referencedService *corev1.Service
-	if o.Spec.ServiceRef != nil {
+	if serviceKey, ok := resolvedNamespacedRef(o.Spec.ServiceRef, o.Namespace); ok {
 		var service corev1.Service
 		if err := d.Get(
 			ctx,
-			types.NamespacedName{Name: o.Spec.ServiceRef.Name, Namespace: o.Spec.ServiceRef.Namespace},
+			serviceKey,
 			&service,
 		); err != nil {
 			if apierrors.IsNotFound(err) {
@@ -2870,9 +2870,9 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 		return reconcile.Result{}, nil
 	}
 	address := o.Spec.TargetAddress
-	if o.Spec.ServiceRef != nil {
+	if serviceKey, ok := resolvedNamespacedRef(o.Spec.ServiceRef, o.Namespace); ok {
 		var s corev1.Service
-		if err := p.Get(ctx, types.NamespacedName{Name: o.Spec.ServiceRef.Name, Namespace: o.Spec.ServiceRef.Namespace}, &s); err != nil {
+		if err := p.Get(ctx, serviceKey, &s); err != nil {
 			if apierrors.IsNotFound(err) {
 				for _, ref := range durableRouterTargets(&o, o.Status.RouterRef, o.Spec.RouterRef) {
 					if cleanupErr := p.cleanupConfiguration(ctx, &o, ref); cleanupErr != nil {
@@ -2895,22 +2895,24 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 			address = serviceTarget
 		}
 	}
-	if address == "" && o.Spec.PodRef != nil {
-		var pod corev1.Pod
-		if err := p.Get(ctx, types.NamespacedName{Name: o.Spec.PodRef.Name, Namespace: o.Spec.PodRef.Namespace}, &pod); err != nil {
-			if apierrors.IsNotFound(err) {
-				for _, ref := range durableRouterTargets(&o, o.Status.RouterRef, o.Spec.RouterRef) {
-					if cleanupErr := p.cleanupConfiguration(ctx, &o, ref); cleanupErr != nil {
-						return p.status(ctx, &o, cleanupErr)
+	if address == "" {
+		if podKey, ok := resolvedNamespacedRef(o.Spec.PodRef, o.Namespace); ok {
+			var pod corev1.Pod
+			if err := p.Get(ctx, podKey, &pod); err != nil {
+				if apierrors.IsNotFound(err) {
+					for _, ref := range durableRouterTargets(&o, o.Status.RouterRef, o.Spec.RouterRef) {
+						if cleanupErr := p.cleanupConfiguration(ctx, &o, ref); cleanupErr != nil {
+							return p.status(ctx, &o, cleanupErr)
+						}
 					}
 				}
+				return p.status(ctx, &o, err)
 			}
-			return p.status(ctx, &o, err)
+			address = pod.Status.PodIP
 		}
-		address = pod.Status.PodIP
 	}
 	if net.ParseIP(address) == nil {
-		if o.Spec.ServiceRef != nil {
+		if _, ok := resolvedNamespacedRef(o.Spec.ServiceRef, o.Namespace); ok {
 			if cleanupErr := p.cleanupAllConfiguration(ctx, &o); cleanupErr != nil {
 				return p.status(ctx, &o, errors.Join(fmt.Errorf("target address %q is not an IP", address), cleanupErr))
 			}

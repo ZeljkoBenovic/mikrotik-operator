@@ -23,6 +23,14 @@ function namespaced(value: unknown): { namespace?: string; name?: string } | und
   return rec as { namespace?: string; name?: string }
 }
 
+function completeNamespacedRef(value: unknown): { namespace?: string; name?: string } | undefined {
+  const rec = namespaced(value)
+  if (!rec?.name) {
+    return undefined
+  }
+  return rec
+}
+
 export function formFromResource(kind: KindConfig, resource: ResourceObject): EditorFormValues {
   const spec = asRecord(resource.spec)
   if (kind.apiKind === 'MikroTikRouter') {
@@ -95,6 +103,22 @@ export function resourceFromForm(kind: KindConfig, values: EditorFormValues): Re
     }
     if (!spec.destinationAddress) {
       delete spec.destinationAddress
+    }
+  }
+  if (kind.apiKind === 'MikroTikDNSRecord' || kind.apiKind === 'MikroTikPortForward') {
+    const serviceRef = completeNamespacedRef(spec.serviceRef)
+    if (serviceRef) {
+      spec.serviceRef = serviceRef
+    } else {
+      delete spec.serviceRef
+    }
+  }
+  if (kind.apiKind === 'MikroTikPortForward') {
+    const podRef = completeNamespacedRef(spec.podRef)
+    if (podRef) {
+      spec.podRef = podRef
+    } else {
+      delete spec.podRef
     }
   }
   delete spec._namespace

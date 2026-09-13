@@ -273,3 +273,112 @@ func TestReconcileServicePortForwardsUpdatesDestinationAddress(t *testing.T) {
 		t.Fatalf("updated spec.destinationAddress = %q, want 198.51.100.10", stored.Spec.DestinationAddress)
 	}
 }
+
+func TestPortForwardReconcilerKeepsNATWhenServiceRefNameIsEmpty(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			RouterRef:     router.Name,
+			Protocol:      "tcp",
+			ExternalPort:  443,
+			TargetPort:    8443,
+			TargetAddress: "10.0.0.20",
+			ServiceRef:    &api.NamespacedName{Namespace: "app"},
+		},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &forward).
+		WithStatusSubresource(&router, &forward).
+		Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+		return routerClient, nil
+	}}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if routerClient.deletedForwards != 0 || routerClient.deletedFirewall != 0 {
+		t.Fatalf("incomplete serviceRef deleted NAT=%d firewall=%d", routerClient.deletedForwards, routerClient.deletedFirewall)
+	}
+	if routerClient.ensuredForwards == 0 {
+		t.Fatal("incomplete serviceRef did not apply spec.targetAddress")
+	}
+	got := routerClient.ensuredPortForwards[len(routerClient.ensuredPortForwards)-1]
+	if got.Target != "10.0.0.20" {
+		t.Fatalf("dst-nat target = %q, want 10.0.0.20", got.Target)
+	}
+}
+
+func TestPortForwardReconcilerResolvesServiceRefInObjectNamespace(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.43.0.10"},
+	}
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			RouterRef:    router.Name,
+			Protocol:     "tcp",
+			ExternalPort: 80,
+			TargetPort:   80,
+			ServiceRef:   &api.NamespacedName{Name: "web"},
+		},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &service, &forward).
+		WithStatusSubresource(&router, &forward).
+		Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+		return routerClient, nil
+	}}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if routerClient.deletedForwards != 0 {
+		t.Fatalf("name-only serviceRef deleted NAT %d times", routerClient.deletedForwards)
+	}
+	if routerClient.ensuredForwards == 0 {
+		t.Fatal("name-only serviceRef did not apply NAT")
+	}
+	got := routerClient.ensuredPortForwards[len(routerClient.ensuredPortForwards)-1]
+	if got.Target != "10.43.0.10" {
+		t.Fatalf("dst-nat target = %q, want Service ClusterIP 10.43.0.10", got.Target)
+	}
+}

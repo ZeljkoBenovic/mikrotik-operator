@@ -469,6 +469,104 @@ func TestDNSReconcilerUsesNodePortInternalIP(t *testing.T) {
 	}
 }
 
+func TestDNSReconcilerKeepsRecordWhenServiceRefNameIsEmpty(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{Name: "primary", Address: "192.0.2.1", CredentialsSecret: corev1.LocalObjectReference{Name: "creds"}}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "app"}, Data: map[string][]byte{"username": []byte("admin"), "password": []byte("x")}}
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "standalone", Namespace: "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikDNSRecordSpec{
+			RouterRef:  router.Name,
+			Name:       "backend.home.arpa",
+			Address:    "10.0.0.8",
+			ServiceRef: &api.NamespacedName{Namespace: "app"},
+		},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&router, &secret, &record).
+		WithStatusSubresource(&router, &record).Build()
+	reconciler := DNSReconciler{
+		Client: kube,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			return routerClient, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if routerClient.deletedDNS != 0 {
+		t.Fatalf("incomplete serviceRef deleted RouterOS DNS %d times", routerClient.deletedDNS)
+	}
+	if routerClient.ensuredDNS == 0 {
+		t.Fatal("incomplete serviceRef did not apply spec.address")
+	}
+	if got := routerClient.ensuredDNSAddresses[len(routerClient.ensuredDNSAddresses)-1]; got != "10.0.0.8" {
+		t.Fatalf("EnsureDNS address = %q, want spec.address 10.0.0.8", got)
+	}
+}
+
+func TestDNSReconcilerResolvesServiceRefInRecordNamespace(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{Name: "primary", Address: "192.0.2.1", CredentialsSecret: corev1.LocalObjectReference{Name: "creds"}}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "app"}, Data: map[string][]byte{"username": []byte("admin"), "password": []byte("x")}}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8"},
+	}
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "standalone", Namespace: "app", UID: "dns-uid",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikDNSRecordSpec{
+			RouterRef:  router.Name,
+			Name:       "backend.home.arpa",
+			Address:    "192.0.2.99",
+			ServiceRef: &api.NamespacedName{Name: "backend"},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&router, &secret, &service, &record, &node).
+		WithStatusSubresource(&router, &record).Build()
+	reconciler := DNSReconciler{
+		Client: kube,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			return routerClient, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if routerClient.deletedDNS != 0 {
+		t.Fatalf("name-only serviceRef deleted RouterOS DNS %d times", routerClient.deletedDNS)
+	}
+	if len(routerClient.ensuredDNSAddresses) == 0 {
+		t.Fatal("name-only serviceRef did not apply DNS")
+	}
+	if got := routerClient.ensuredDNSAddresses[len(routerClient.ensuredDNSAddresses)-1]; got != "10.0.0.8" {
+		t.Fatalf("EnsureDNS address = %q, want Service ClusterIP 10.0.0.8", got)
+	}
+}
+
 func TestDNSReconcilerSkipsClusterRoutesWhenOwnedByService(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	endpoint := api.RouterEndpoint{Name: "primary", Address: "192.0.2.1", CredentialsSecret: corev1.LocalObjectReference{Name: "creds"}}

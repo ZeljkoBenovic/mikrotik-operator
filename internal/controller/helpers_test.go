@@ -485,6 +485,42 @@ func TestAppendUniqueServicePort(t *testing.T) {
 	}
 }
 
+func TestResolvedNamespacedRef(t *testing.T) {
+	tests := []struct {
+		name             string
+		ref              *api.NamespacedName
+		defaultNamespace string
+		want             types.NamespacedName
+		ok               bool
+	}{
+		{name: "nil", defaultNamespace: "app"},
+		{name: "empty name leftover namespace", ref: &api.NamespacedName{Namespace: "app"}, defaultNamespace: "app"},
+		{name: "whitespace name", ref: &api.NamespacedName{Namespace: "app", Name: "  "}, defaultNamespace: "app"},
+		{
+			name:             "name only uses object namespace",
+			ref:              &api.NamespacedName{Name: "web"},
+			defaultNamespace: "app",
+			want:             types.NamespacedName{Namespace: "app", Name: "web"},
+			ok:               true,
+		},
+		{
+			name:             "explicit namespace",
+			ref:              &api.NamespacedName{Namespace: "other", Name: "web"},
+			defaultNamespace: "app",
+			want:             types.NamespacedName{Namespace: "other", Name: "web"},
+			ok:               true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := resolvedNamespacedRef(test.ref, test.defaultNamespace)
+			if ok != test.ok || got != test.want {
+				t.Fatalf("resolvedNamespacedRef() = (%#v, %t), want (%#v, %t)", got, ok, test.want, test.ok)
+			}
+		})
+	}
+}
+
 func TestPortForwardDestinationAddress(t *testing.T) {
 	tests := []struct {
 		name  string
