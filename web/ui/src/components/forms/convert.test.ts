@@ -89,6 +89,18 @@ describe('form conversion', () => {
     })
     expect(withoutDestination.spec.destinationAddress).toBeUndefined()
 
+    const incompleteDNS = resourceFromForm(dns, {
+      name: 'www',
+      namespace: 'app',
+      spec: {
+        name: 'www.home.arpa',
+        address: '10.0.0.8',
+        routerRef: 'edge',
+        serviceRef: { namespace: 'app' },
+      },
+    })
+    expect(incompleteDNS.spec.serviceRef).toBeUndefined()
+
     const fromResource = formFromResource(forwards, {
       metadata: { name: 'web', namespace: 'app' },
       spec: { podRef: { namespace: 'app', name: 'web-0' }, protocol: 'tcp' },

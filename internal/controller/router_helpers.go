@@ -107,6 +107,21 @@ func endpointClaimedByOtherRouter(ctx context.Context, kube client.Client, route
 	return false, nil
 }
 
+func resolvedNamespacedRef(ref *api.NamespacedName, defaultNamespace string) (types.NamespacedName, bool) {
+	if ref == nil {
+		return types.NamespacedName{}, false
+	}
+	name := strings.TrimSpace(ref.Name)
+	if name == "" {
+		return types.NamespacedName{}, false
+	}
+	namespace := strings.TrimSpace(ref.Namespace)
+	if namespace == "" {
+		namespace = defaultNamespace
+	}
+	return types.NamespacedName{Namespace: namespace, Name: name}, true
+}
+
 func normalizeRouterLookupKey(key types.NamespacedName) types.NamespacedName {
 	if key.Name == "" {
 		return key

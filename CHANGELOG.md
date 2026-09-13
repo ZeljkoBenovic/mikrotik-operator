@@ -7,6 +7,13 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Incomplete `serviceRef` / `podRef` values (empty name, or name-only without
+  namespace) no longer look up a Service/Pod in the empty namespace and delete
+  applied RouterOS DNS or NAT. The name is required; a missing namespace uses
+  the custom resource namespace. The admin UI also drops name-less refs on save.
+
 ### Added
 
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
