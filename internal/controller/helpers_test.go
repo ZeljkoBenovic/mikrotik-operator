@@ -513,3 +513,76 @@ func TestPortForwardDestinationAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestConnectRouterClientsClosesPartialConnectionsOnLaterFailure(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "core", Namespace: "app"},
+		Spec: api.MikroTikRouterSpec{
+			Routers: []api.RouterEndpoint{
+				{
+					Name:              "a",
+					Address:           "192.0.2.1",
+					CredentialsSecret: corev1.LocalObjectReference{Name: "creds-a"},
+				},
+				{
+					Name:              "b",
+					Address:           "192.0.2.2",
+					CredentialsSecret: corev1.LocalObjectReference{Name: "creds-b"},
+				},
+			},
+		},
+	}
+	secretA := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "creds-a", Namespace: "app"},
+		Data:       map[string][]byte{"username": []byte("admin"), "password": []byte("x")},
+	}
+	secretB := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "creds-b", Namespace: "app"},
+		Data:       map[string][]byte{"username": []byte("admin"), "password": []byte("x")},
+	}
+
+	tests := []struct {
+		name    string
+		objects []client.Object
+		factory ros.Factory
+		first   *recordingRouterClient
+	}{
+		{
+			name: "later factory error",
+			objects: []client.Object{
+				router.DeepCopy(),
+				secretA.DeepCopy(),
+				secretB.DeepCopy(),
+			},
+			first: &recordingRouterClient{},
+		},
+		{
+			name: "later secret missing",
+			objects: []client.Object{
+				router.DeepCopy(),
+				secretA.DeepCopy(),
+			},
+			first: &recordingRouterClient{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			first := test.first
+			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(test.objects...).Build()
+			_, err := connectRouterClients(context.Background(), kube, func(_ context.Context, address string, _ int32, _ bool, _, _ string) (ros.Client, error) {
+				if address == "192.0.2.1" {
+					return first, nil
+				}
+				return nil, errors.New("dial failed")
+			}, router)
+			if err == nil {
+				t.Fatal("expected connect error after the first endpoint succeeded")
+			}
+			if first.closed == 0 {
+				t.Fatal("first RouterOS client was left open after a later endpoint failed")
+			}
+		})
+	}
+}
