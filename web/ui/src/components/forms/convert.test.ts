@@ -37,6 +37,20 @@ describe('form conversion', () => {
     expect(body.spec.address).toBeUndefined()
     expect(body.spec.endpointMode).toBeUndefined()
     expect(body.spec.routers).toHaveLength(1)
+
+    const single = resourceFromForm(routers, {
+      name: 'edge',
+      namespace: 'app',
+      spec: {
+        endpointMode: 'single',
+        address: '192.0.2.10',
+        credentialsSecret: { name: 'creds' },
+        routers: [{ name: 'a', address: '192.0.2.11', credentialsSecret: { name: 'creds' } }],
+      },
+    })
+    expect(single.spec.routers).toBeUndefined()
+    expect(single.spec.address).toBe('192.0.2.10')
+    expect(single.spec.endpointMode).toBeUndefined()
   })
 
   it('keeps exactly one port-forward target', () => {

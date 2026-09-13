@@ -619,6 +619,152 @@ func TestClusterRouteHopsMarksOverrideVersusSingleNodeOrigin(t *testing.T) {
 	}
 }
 
+func TestReconcileOwnedClusterRoutesUpdatesStaleRouterRefAndOrigin(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app", UID: "service-uid"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "core", Namespace: "edge"},
+		Spec: api.MikroTikRouterSpec{
+			Routers: []api.RouterEndpoint{
+				{
+					Name:              "a",
+					Address:           "192.0.2.1",
+					CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+					RouteGateway:      "192.0.2.10",
+				},
+				{
+					Name:              "b",
+					Address:           "192.0.2.2",
+					CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+				},
+			},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &router, &node).Build()
+	request := clusterRouteReconcileRequest{
+		kube:       kube,
+		scheme:     scheme,
+		owner:      &service,
+		sourceName: "service/" + service.Name,
+		namespace:  service.Namespace,
+		routerRef:  "edge/core",
+		services:   []corev1.Service{service},
+	}
+	candidates, err := desiredClusterRouteCandidates(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].origin != clusterRouteOriginBoth {
+		t.Fatalf("candidates = %#v, want one hop with origin %q", candidates, clusterRouteOriginBoth)
+	}
+
+	stale := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      candidates[0].name,
+			Namespace: service.Namespace,
+			UID:       "stale-route-uid",
+			Labels:    map[string]string{clusterRouteOriginLabel: clusterRouteOriginOverride},
+		},
+		Spec: api.MikroTikRouteSpec{
+			RouterRef:   "old-router",
+			Destination: candidates[0].destination,
+			Gateway:     candidates[0].gateway,
+		},
+	}
+	if err := controllerutil.SetControllerReference(&service, &stale, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Create(context.Background(), &stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileOwnedClusterRoutes(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+
+	var stored api.MikroTikRoute
+	if err := kube.Get(context.Background(), types.NamespacedName{Name: stale.Name, Namespace: stale.Namespace}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.UID != stale.UID {
+		t.Fatalf("route was recreated: uid %s, want %s", stored.UID, stale.UID)
+	}
+	if stored.Spec.RouterRef != request.routerRef {
+		t.Fatalf("routerRef %q, want %q", stored.Spec.RouterRef, request.routerRef)
+	}
+	if stored.Labels[clusterRouteOriginLabel] != clusterRouteOriginBoth {
+		t.Fatalf("origin %q, want %q", stored.Labels[clusterRouteOriginLabel], clusterRouteOriginBoth)
+	}
+	if stored.Spec.Destination != candidates[0].destination || stored.Spec.Gateway != candidates[0].gateway {
+		t.Fatalf("route spec drifted: %#v", stored.Spec)
+	}
+}
+
+func TestRouteReconcilerDeletesGeneratedHopOnUnconfiguredEndpoint(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoints := []api.RouterEndpoint{
+		{
+			Name:              "a",
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+			RouteGateway:      "192.0.2.11",
+		},
+		{
+			Name:              "b",
+			Address:           "192.0.2.2",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "core", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: endpoints},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: endpoints},
+	}
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "app"},
+		Data:       map[string][]byte{"username": []byte("admin"), "password": []byte("x")},
+	}
+	route := generatedClusterRoute("rt-override", "192.0.2.11", clusterRouteOriginOverride)
+	clients := map[string]*recordingRouterClient{
+		"192.0.2.1": {},
+		"192.0.2.2": {},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&router, &secret, &route).
+		WithStatusSubresource(&router, &route).Build()
+	reconciler := RouteReconciler{
+		Client: kube,
+		Factory: func(_ context.Context, address string, _ int32, _ bool, _, _ string) (ros.Client, error) {
+			client, ok := clients[address]
+			if !ok {
+				t.Fatalf("unexpected router address %s", address)
+			}
+			return client, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", route.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if !stringSetEqual(clients["192.0.2.1"].ensuredRouteGateways, []string{"192.0.2.11"}) {
+		t.Fatalf("configured endpoint gateways %#v, want [192.0.2.11]", clients["192.0.2.1"].ensuredRouteGateways)
+	}
+	if len(clients["192.0.2.2"].ensuredRouteGateways) != 0 {
+		t.Fatalf("unconfigured endpoint installed override %#v", clients["192.0.2.2"].ensuredRouteGateways)
+	}
+	wantComment := ros.ManagedComment("route", route.Name, route.Namespace)
+	if len(clients["192.0.2.2"].deletedRouteComments) != 1 || clients["192.0.2.2"].deletedRouteComments[0] != wantComment {
+		t.Fatalf("unconfigured endpoint deletes %#v, want [%q]", clients["192.0.2.2"].deletedRouteComments, wantComment)
+	}
+	if len(clients["192.0.2.1"].deletedRouteComments) != 0 {
+		t.Fatalf("configured endpoint deleted its hop: %#v", clients["192.0.2.1"].deletedRouteComments)
+	}
+}
+
 func generatedClusterRoute(name, gateway, origin string) api.MikroTikRoute {
 	return api.MikroTikRoute{
 		ObjectMeta: metav1.ObjectMeta{

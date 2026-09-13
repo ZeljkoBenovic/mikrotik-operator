@@ -394,6 +394,7 @@ type recordingRouterClient struct {
 	deletedForwards          int
 	deletedFirewall          int
 	deletedManaged           int
+	closed                   int
 	ensuredDNSAddresses      []string
 	ensuredRouteGateways     []string
 	ensuredRouteDestinations []string
@@ -479,4 +480,7 @@ func (client *recordingRouterClient) Import(_ context.Context, script string) er
 	client.imported = append(client.imported, script)
 	return nil
 }
-func (*recordingRouterClient) Close() error { return nil }
+func (client *recordingRouterClient) Close() error {
+	client.closed++
+	return nil
+}

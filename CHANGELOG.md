@@ -18,6 +18,9 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover in-place cluster-route routerRef/origin repair, generated-hop delete on
+  unconfigured multi-endpoint routers, partial RouterOS connection cleanup, and
+  Admin UI single-endpoint form stripping of leftover `routers[]`.
 
 ## [0.4.0] - 2026-09-01
 
