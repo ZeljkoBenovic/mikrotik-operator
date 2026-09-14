@@ -14,6 +14,10 @@ and the project follows semantic versioning.
 
 ### Tests
 
+- Cover leftover Service DNS children after `dns-name` annotation removal,
+  blocking child writes while a `MikroTikRouter` is terminating or unfinalized,
+  RouterOS cleanup through `status.appliedEndpoints` after spec endpoints are
+  cleared, and firewall apply to every multi-endpoint hop.
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
