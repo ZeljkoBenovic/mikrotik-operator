@@ -51,6 +51,11 @@ The core resources are namespaced:
 | `MikroTikPortForward` | `dst-nat`, `src-nat`, and forward firewall rules |
 | `MikroTikFirewallRule` | Custom `/ip firewall filter` entry |
 
+Chart `0.5.0` also installs `MikroTikBackup` and `MikroTikRestore` CRDs. Those
+kinds are an API preview: no reconciler, RBAC, or admin UI path watches them
+yet. Applying either object does not call RouterOS. See
+[`docs/_reference/reference.md`](docs/_reference/reference.md#backup-and-restore-api-preview).
+
 `routerRef` is optional when exactly one non-deleting `MikroTikRouter` exists
 in the resource namespace, or when that namespace has none and exactly one
 non-deleting router exists in the cluster. Set `routerRef` to `name` or

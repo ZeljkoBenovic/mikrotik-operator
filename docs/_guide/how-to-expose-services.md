@@ -112,6 +112,13 @@ creates DNS and routes only after all of the following are true:
 
 See [`examples/gateway-api.yaml`](https://github.com/ZeljkoBenovic/mikrotik-operator/blob/main/examples/gateway-api.yaml).
 
+Hostnames and `public-ip` plus port and protocol must map to a single backend
+Service. A second owner for the same match deletes previously generated
+children instead of leaving stale DNS or NAT. A standalone CR that already
+uses the generated child name (`<service>-dns`, `rt-<hash>`, or `pf-<hash>`)
+is not adopted. See
+[Troubleshooting]({% link _guide/troubleshooting.md %}).
+
 ## Standalone port forward
 
 Create a `MikroTikPortForward` when you want NAT without a Service annotation.
