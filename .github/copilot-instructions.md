@@ -89,6 +89,7 @@ credentials committed to the repository.
 | Release/image behavior | `.goreleaser.yaml`, `Dockerfile`, `Dockerfile.release`, `Dockerfile.ui`, `Dockerfile.ui.release`, `justfile`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, README, `docs/_guide/getting-started.md` |
 | Helm chart publishing | `charts/mikrotik-operator/Chart.yaml`, `.github/workflows/release-chart.yml`, README, `docs/_guide/getting-started.md` |
 | Operator behavior users hit | `docs/`, especially `docs/_guide/troubleshooting.md` and `docs/_reference/reference.md` |
+| Backup/Restore CRDs | Installed by chart `0.5.0`; not reconciled until `controller.Setup`, ClusterRole rules, UI allowlist, and tests are wired. Keep public docs as an API preview until then. |
 | Dependency update behavior | `go.mod`, `go.sum`, `Dockerfile`, `.github/workflows`, `.github/dependabot.yml`, CI validation |
 | Contributor workflow | `AGENTS.md`, `CLAUDE.md`, this file, README, `.github/PULL_REQUEST_TEMPLATE.md` |
 
