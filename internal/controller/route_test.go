@@ -156,3 +156,51 @@ func TestRouteReconcilerDeletesRouterOSOnDeletion(t *testing.T) {
 		t.Fatal("deletion left the managed-config finalizer")
 	}
 }
+
+func TestRouteReconcilerAmbiguousSelectionSettlesWithoutOscillating(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	route := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "cluster",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a"},
+		},
+		Spec:   api.MikroTikRouteSpec{Destination: "10.43.0.10/32", Gateway: "192.168.1.1"},
+		Status: api.MikroTikRouteStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &route)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&route).Build()
+	reconciler := RouteReconciler{Client: kube, Factory: factory}
+	request := reconcileRequest(route.Namespace, route.Name)
+	for pass := 0; pass < 4; pass++ {
+		if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+			t.Fatalf("reconcile %d: %v", pass, err)
+		}
+	}
+	if got := len(clients["router-a"].deletedRouteComments); got != 1 {
+		t.Fatalf("router-a deletes = %d, want 1 after selection became ambiguous", got)
+	}
+	if len(clients["router-b"].deletedRouteComments) != 0 {
+		t.Fatal("ambiguous selection cleaned a router that was not in durable history")
+	}
+	var stored api.MikroTikRoute
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: route.Namespace, Name: route.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[durableRouterTargetsAnnotation] != "" {
+		t.Fatalf("durable router annotation = %q, want cleared after later reconciles", stored.Annotations[durableRouterTargetsAnnotation])
+	}
+	if stored.Status.Applied {
+		t.Fatal("ambiguous selection left status.applied=true")
+	}
+	if stored.Status.RouterRef != "" {
+		t.Fatalf("status.routerRef = %q, want cleared so persist-then-clean cannot restart", stored.Status.RouterRef)
+	}
+	if len(stored.Status.Conditions) == 0 || stored.Status.Conditions[0].Status != metav1.ConditionFalse {
+		t.Fatalf("conditions = %#v, want Ready=False", stored.Status.Conditions)
+	}
+	if !strings.Contains(stored.Status.Conditions[0].Message, "multiple MikroTikRouters") {
+		t.Fatalf("status message = %q, want implicit router selection error", stored.Status.Conditions[0].Message)
+	}
+}

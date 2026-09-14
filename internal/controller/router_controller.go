@@ -346,7 +346,8 @@ func (d *DNSReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 				if _, compactErr := compactDurableRouterTarget(ctx, d.Client, &o, ""); compactErr != nil {
 					return reconcile.Result{}, compactErr
 				}
-				return reconcile.Result{}, nil
+				o.Status.RouterRef = ""
+				return d.status(ctx, &o, err)
 			}
 			if o.Status.RouterRef != "" {
 				o.Status.RouterRef = ""
@@ -2623,7 +2624,8 @@ func (r *RouteReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 				if _, compactErr := compactDurableRouterTarget(ctx, r.Client, &route, ""); compactErr != nil {
 					return reconcile.Result{}, compactErr
 				}
-				return reconcile.Result{}, nil
+				route.Status.RouterRef = ""
+				return r.status(ctx, &route, err)
 			}
 			if route.Status.RouterRef != "" {
 				route.Status.RouterRef = ""
@@ -2757,7 +2759,8 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req reconcile.Re
 				if _, compactErr := compactDurableRouterTarget(ctx, r.Client, &rule, ""); compactErr != nil {
 					return reconcile.Result{}, compactErr
 				}
-				return reconcile.Result{}, nil
+				rule.Status.RouterRef = ""
+				return r.status(ctx, &rule, err)
 			}
 			if rule.Status.RouterRef != "" {
 				rule.Status.RouterRef = ""
@@ -2940,7 +2943,8 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 				if _, compactErr := compactDurableRouterTarget(ctx, p.Client, &o, ""); compactErr != nil {
 					return reconcile.Result{}, compactErr
 				}
-				return reconcile.Result{}, nil
+				o.Status.RouterRef = ""
+				return p.status(ctx, &o, err)
 			}
 			if o.Status.RouterRef != "" {
 				o.Status.RouterRef = ""
