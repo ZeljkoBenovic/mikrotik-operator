@@ -513,3 +513,62 @@ func TestPortForwardDestinationAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestWithRouterConnectionsCleanupUsesAppliedEndpointsWhenSpecCleared(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "router",
+			Namespace:  "app",
+			Finalizers: []string{resourceFinalizer},
+		},
+		Status: api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&router, &secret).Build()
+	dials := 0
+	err := withRouterConnections(
+		context.Background(),
+		kube,
+		func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			dials++
+			return &recordingRouterClient{}, nil
+		},
+		types.NamespacedName{Namespace: router.Namespace, Name: router.Name},
+		false,
+		func(_ api.MikroTikRouter, connections []routerConnection) error {
+			if len(connections) != 1 || connections[0].Endpoint.Address != endpoint.Address {
+				t.Fatalf("cleanup connections = %#v, want applied endpoint %s", connections, endpoint.Address)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dials != 1 {
+		t.Fatalf("cleanup dials = %d, want 1", dials)
+	}
+
+	if err := withRouterConnections(
+		context.Background(),
+		kube,
+		func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			t.Fatal("child writes must not dial a router whose spec endpoints were cleared")
+			return nil, nil
+		},
+		types.NamespacedName{Namespace: router.Namespace, Name: router.Name},
+		true,
+		func(api.MikroTikRouter, []routerConnection) error {
+			t.Fatal("child write callback ran against a router that is not active")
+			return nil
+		},
+	); err == nil {
+		t.Fatal("expected requireActive to reject a router without current spec endpoints")
+	}
+}

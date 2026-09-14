@@ -92,6 +92,64 @@ func TestFirewallRuleReconcilerAppliesSpecToRouterOS(t *testing.T) {
 	}
 }
 
+func TestFirewallRuleReconcilerAppliesToEveryEndpoint(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	primary := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	backup := api.RouterEndpoint{
+		Name:              "backup",
+		Address:           "192.0.2.11",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{primary, backup}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{primary, backup}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	rule := api.MikroTikFirewallRule{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web-allow",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikFirewallRuleSpec{
+			RouterRef: router.Name,
+			Chain:     "forward",
+			Action:    "accept",
+			Protocol:  "tcp",
+		},
+	}
+	clients := map[string]*recordingRouterClient{
+		primary.Address: {},
+		backup.Address:  {},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &rule).
+		WithStatusSubresource(&router, &rule).
+		Build()
+	reconciler := FirewallRuleReconciler{Client: kube, Factory: func(_ context.Context, address string, _ int32, _ bool, _, _ string) (ros.Client, error) {
+		client, ok := clients[address]
+		if !ok {
+			t.Fatalf("unexpected router address %s", address)
+		}
+		return client, nil
+	}}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(rule.Namespace, rule.Name)); err != nil {
+		t.Fatal(err)
+	}
+	for address, routerClient := range clients {
+		if routerClient.ensuredFirewall != 1 {
+			t.Fatalf("%s EnsureFirewallRule calls = %d, want 1", address, routerClient.ensuredFirewall)
+		}
+	}
+}
+
 func TestFirewallRuleReconcilerRejectsMissingChainOrAction(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	rule := api.MikroTikFirewallRule{

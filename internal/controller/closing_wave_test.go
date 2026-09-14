@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,6 +51,122 @@ func TestRouterActiveGateUsesPhysicalEndpointHistory(t *testing.T) {
 	})
 	if err := ensureRouterActive(context.Background(), kube, router); err == nil {
 		t.Fatal("obsolete physical endpoint history did not block child writes")
+	}
+}
+
+func TestEnsureRouterActiveRejectsTerminatingAndUnfinalizedRouters(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	endpoint := api.RouterEndpoint{
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	now := metav1.NewTime(time.Now())
+	tests := []struct {
+		name   string
+		router api.MikroTikRouter
+		want   string
+	}{
+		{
+			name: "terminating",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "router",
+					Namespace:         "app",
+					Finalizers:        []string{resourceFinalizer},
+					DeletionTimestamp: &now,
+				},
+				Spec:   api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+				Status: api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+			},
+			want: "being deleted",
+		},
+		{
+			name: "missing finalizer",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+				Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+				Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+			},
+			want: "not finalized",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&test.router).Build()
+			err := ensureRouterActive(context.Background(), kube, test.router)
+			if err == nil {
+				t.Fatal("expected child write gate to reject the router")
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestDNSReconcilerDoesNotApplyWhileRouterIsTerminating(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	now := metav1.NewTime(time.Now())
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "router",
+			Namespace:         "app",
+			Finalizers:        []string{resourceFinalizer},
+			DeletionTimestamp: &now,
+		},
+		Spec:   api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status: api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikDNSRecordSpec{
+			RouterRef: router.Name,
+			Name:      "web.home.arpa",
+			Address:   "10.0.0.8",
+		},
+	}
+	dials := 0
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &record).
+		WithStatusSubresource(&router, &record).
+		Build()
+	reconciler := DNSReconciler{
+		Client: kube,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			dials++
+			return &recordingRouterClient{}, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if dials != 0 {
+		t.Fatalf("terminating router was dialed %d times", dials)
+	}
+	var stored api.MikroTikDNSRecord
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status.Applied {
+		t.Fatal("DNS record was applied against a terminating router")
+	}
+	if len(stored.Status.Conditions) == 0 || !strings.Contains(stored.Status.Conditions[0].Message, "being deleted") {
+		t.Fatalf("status = %#v, want being-deleted condition", stored.Status)
 	}
 }
 

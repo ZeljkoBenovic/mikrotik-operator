@@ -168,6 +168,42 @@ func TestServiceDNSReconcilerDeletesRoutesWhenDNSAnnotationRemoved(t *testing.T)
 	}
 }
 
+func TestServiceDNSReconcilerDeletesOwnedDNSRecordWhenAnnotationRemoved(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service, router, node := annotatedClusterIPFixture()
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{Name: service.Name + "-dns", Namespace: service.Namespace},
+		Spec:       api.MikroTikDNSRecordSpec{RouterRef: router.Name, Name: "web.home.arpa", Address: "10.0.0.8"},
+	}
+	if err := controllerutil.SetControllerReference(&service, &record, scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &router, &node, &record).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	if err := reconcileServiceUntil(t, reconciler, service); err != nil {
+		t.Fatal(err)
+	}
+	if len(ownedDNSRecords(t, kube, &service)) == 0 {
+		t.Fatal("expected owned DNS child before annotation removal")
+	}
+
+	var stored corev1.Service
+	if err := kube.Get(context.Background(), types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	delete(stored.Annotations, api.DNSNameAnnotation)
+	if err := kube.Update(context.Background(), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileServiceUntil(t, reconciler, stored); err != nil {
+		t.Fatal(err)
+	}
+	if got := ownedDNSRecords(t, kube, &stored); len(got) != 0 {
+		t.Fatalf("owned DNS child remained after annotation removal: %#v", got)
+	}
+	assertNotFound(t, kube, &api.MikroTikDNSRecord{}, record.Namespace, record.Name)
+}
+
 func TestServiceDNSReconcilerDeletesRoutesOnServiceDeletion(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	service, router, node := annotatedClusterIPFixture()
@@ -586,6 +622,21 @@ func ownedRoutes(t *testing.T, kube client.Client, owner client.Object) []api.Mi
 	for _, route := range list.Items {
 		if metav1.IsControlledBy(&route, owner) {
 			owned = append(owned, route)
+		}
+	}
+	return owned
+}
+
+func ownedDNSRecords(t *testing.T, kube client.Client, owner client.Object) []api.MikroTikDNSRecord {
+	t.Helper()
+	var list api.MikroTikDNSRecordList
+	if err := kube.List(context.Background(), &list, client.InNamespace(owner.GetNamespace())); err != nil {
+		t.Fatal(err)
+	}
+	owned := make([]api.MikroTikDNSRecord, 0)
+	for _, record := range list.Items {
+		if metav1.IsControlledBy(&record, owner) {
+			owned = append(owned, record)
 		}
 	}
 	return owned
