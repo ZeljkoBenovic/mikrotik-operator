@@ -12,6 +12,12 @@ and the project follows semantic versioning.
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
   Operator `appVersion` remains `v0.4.0`.
 
+### Documentation
+
+- Document the Backup/Restore CRD preview (installed, not reconciled),
+  generated-child ambiguity and name-collision cleanup, and Admin UI
+  preservation of managed finalizers.
+
 ### Tests
 
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
