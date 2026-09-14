@@ -273,3 +273,56 @@ func TestReconcileServicePortForwardsUpdatesDestinationAddress(t *testing.T) {
 		t.Fatalf("updated spec.destinationAddress = %q, want 198.51.100.10", stored.Spec.DestinationAddress)
 	}
 }
+
+func TestPortForwardReconcilerAmbiguousSelectionSettlesWithoutOscillating(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a"},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			Protocol:      "tcp",
+			ExternalPort:  443,
+			TargetPort:    8443,
+			TargetAddress: "10.0.0.20",
+		},
+		Status: api.MikroTikPortForwardStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &forward)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&forward).Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: factory}
+	request := reconcileRequest(forward.Namespace, forward.Name)
+	for pass := 0; pass < 4; pass++ {
+		if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+			t.Fatalf("reconcile %d: %v", pass, err)
+		}
+	}
+	if clients["router-a"].deletedForwards != 1 || clients["router-a"].deletedFirewall != 1 {
+		t.Fatalf("router-a deletes forwards=%d firewall=%d, want 1 each", clients["router-a"].deletedForwards, clients["router-a"].deletedFirewall)
+	}
+	if clients["router-b"].deletedForwards != 0 || clients["router-b"].deletedFirewall != 0 {
+		t.Fatal("ambiguous selection cleaned a router that was not in durable history")
+	}
+	var stored api.MikroTikPortForward
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: forward.Namespace, Name: forward.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[durableRouterTargetsAnnotation] != "" {
+		t.Fatalf("durable router annotation = %q, want cleared after later reconciles", stored.Annotations[durableRouterTargetsAnnotation])
+	}
+	if stored.Status.Applied {
+		t.Fatal("ambiguous selection left status.applied=true")
+	}
+	if stored.Status.RouterRef != "" {
+		t.Fatalf("status.routerRef = %q, want cleared so persist-then-clean cannot restart", stored.Status.RouterRef)
+	}
+	if len(stored.Status.Conditions) == 0 || stored.Status.Conditions[0].Status != metav1.ConditionFalse {
+		t.Fatalf("conditions = %#v, want Ready=False", stored.Status.Conditions)
+	}
+	if !strings.Contains(stored.Status.Conditions[0].Message, "multiple MikroTikRouters") {
+		t.Fatalf("status message = %q, want implicit router selection error", stored.Status.Conditions[0].Message)
+	}
+}

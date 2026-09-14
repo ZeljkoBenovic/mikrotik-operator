@@ -12,12 +12,21 @@ and the project follows semantic versioning.
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
   Operator `appVersion` remains `v0.4.0`.
 
+### Fixed
+
+- Ambiguous implicit router selection now records `Ready=False` and clears
+  `status.routerRef` after cleaning the previously applied router, so a second
+  `MikroTikRouter` cannot restart persist-then-clean and delete RouterOS
+  entries on every later reconcile.
+
 ### Tests
 
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover ambiguous implicit router selection settling without re-deleting
+  DNS, route, NAT, or firewall entries.
 
 ## [0.4.0] - 2026-09-01
 

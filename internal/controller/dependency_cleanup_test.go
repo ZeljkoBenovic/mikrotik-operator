@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
@@ -46,6 +47,54 @@ func TestDNSNonAddressableServiceCleansEveryDurableRouter(t *testing.T) {
 		if routerClient.deletedDNS == 0 {
 			t.Fatalf("%s was not fully cleaned: DNS=%d", name, routerClient.deletedDNS)
 		}
+	}
+}
+
+func TestDNSReconcilerAmbiguousSelectionSettlesWithoutOscillating(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a"},
+		},
+		Spec:   api.MikroTikDNSRecordSpec{Name: "web.example.com", Address: "10.0.0.8"},
+		Status: api.MikroTikDNSRecordStatus{RouterRef: "router-a", Applied: true},
+	}
+	objects = append(objects, &record)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&record).Build()
+	reconciler := DNSReconciler{Client: kube, Factory: factory}
+	request := reconcileRequest(record.Namespace, record.Name)
+	for pass := 0; pass < 4; pass++ {
+		if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+			t.Fatalf("reconcile %d: %v", pass, err)
+		}
+	}
+	if clients["router-a"].deletedDNS != 1 {
+		t.Fatalf("router-a deletes = %d, want 1 after selection became ambiguous", clients["router-a"].deletedDNS)
+	}
+	if clients["router-b"].deletedDNS != 0 {
+		t.Fatal("ambiguous selection cleaned a router that was not in durable history")
+	}
+	var stored api.MikroTikDNSRecord
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[durableRouterTargetsAnnotation] != "" {
+		t.Fatalf("durable router annotation = %q, want cleared after later reconciles", stored.Annotations[durableRouterTargetsAnnotation])
+	}
+	if stored.Status.Applied {
+		t.Fatal("ambiguous selection left status.applied=true")
+	}
+	if stored.Status.RouterRef != "" {
+		t.Fatalf("status.routerRef = %q, want cleared so persist-then-clean cannot restart", stored.Status.RouterRef)
+	}
+	if len(stored.Status.Conditions) == 0 || stored.Status.Conditions[0].Status != metav1.ConditionFalse {
+		t.Fatalf("conditions = %#v, want Ready=False", stored.Status.Conditions)
+	}
+	if !strings.Contains(stored.Status.Conditions[0].Message, "multiple MikroTikRouters") {
+		t.Fatalf("status message = %q, want implicit router selection error", stored.Status.Conditions[0].Message)
 	}
 }
 
