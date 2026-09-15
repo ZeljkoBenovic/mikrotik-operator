@@ -177,14 +177,22 @@ func (r *RouterReconciler) reconcileDeletionLocked(ctx context.Context, obj *api
 
 func (r *RouterReconciler) cleanupRemovedEndpoints(ctx context.Context, router api.MikroTikRouter) error {
 	current := make(map[string]struct{}, len(routerEndpoints(router)))
+	currentDevices := make(map[string]struct{}, len(routerEndpoints(router)))
 	for _, endpoint := range routerEndpoints(router) {
 		current[endpointKey(endpoint)] = struct{}{}
+		currentDevices[endpointDeviceKey(endpoint)] = struct{}{}
 	}
 	for _, endpoint := range router.Status.AppliedEndpoints {
 		if strings.TrimSpace(endpoint.Address) == "" || strings.TrimSpace(endpoint.CredentialsSecret.Name) == "" {
 			continue
 		}
 		if _, exists := current[endpointKey(endpoint)]; exists {
+			continue
+		}
+		// Port and TLS are connection metadata. A device-wide managed-config
+		// sweep here would delete live DNS, NAT, routes, and firewall rules on
+		// a host that is still in spec (for example after enabling API TLS).
+		if _, exists := currentDevices[endpointDeviceKey(endpoint)]; exists {
 			continue
 		}
 		claimed, err := endpointClaimedByOtherRouter(ctx, r.Client, router, endpoint)
@@ -222,6 +230,14 @@ func deleteManagedConfiguration(ctx context.Context, connection ros.Client) erro
 	return cleaner.DeleteManagedConfiguration(ctx)
 }
 
+func endpointDeviceKey(endpoint api.RouterEndpoint) string {
+	address := strings.TrimSpace(endpoint.Address)
+	if ip := net.ParseIP(address); ip != nil {
+		return ip.String()
+	}
+	return strings.ToLower(strings.TrimSuffix(address, "."))
+}
+
 func endpointKey(endpoint api.RouterEndpoint) string {
 	// Endpoint names and credential secrets are metadata, not the identity of the
 	// RouterOS device.  Treating either as identity causes credential rotation or
@@ -234,13 +250,7 @@ func endpointKey(endpoint api.RouterEndpoint) string {
 			port = 8728
 		}
 	}
-	address := strings.TrimSpace(endpoint.Address)
-	if ip := net.ParseIP(address); ip != nil {
-		address = ip.String()
-	} else {
-		address = strings.ToLower(strings.TrimSuffix(address, "."))
-	}
-	return strings.Join([]string{address, strconv.FormatInt(int64(port), 10), strconv.FormatBool(endpoint.TLS)}, "|")
+	return strings.Join([]string{endpointDeviceKey(endpoint), strconv.FormatInt(int64(port), 10), strconv.FormatBool(endpoint.TLS)}, "|")
 }
 
 func durableRouterEndpointUnion(previous, current []api.RouterEndpoint) []api.RouterEndpoint {

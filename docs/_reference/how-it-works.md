@@ -36,9 +36,10 @@ modified or deleted.
 Managed writes wait until `ensureRouterActive` succeeds: the router is not
 deleting, has the `mikrotik.operator.io/managed-config` finalizer, has
 durable `status.appliedEndpoints` matching the current spec, and uniquely
-owns those endpoints. Endpoint identity is address, port, and TLS — not the
+owns those endpoints. Connection identity is address, port, and TLS — not the
 endpoint display name or Secret name — so credential rotation does not wipe
-managed rules.
+managed rules. Changing only the API port or TLS flag on the same address
+does not sweep managed configuration; that host is still in spec.
 
 In-process fences serialize RouterOS operations per router. The Helm chart
 enables leader election (`LeaderElectionID` `mikrotik-operator`); multiple

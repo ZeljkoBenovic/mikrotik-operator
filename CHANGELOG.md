@@ -7,6 +7,13 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Changing a `MikroTikRouter` API port or TLS flag on the same address no
+  longer runs a device-wide managed-config sweep. Live DNS, NAT, route, and
+  firewall entries stay in place while `status.appliedEndpoints` compact to
+  the current connection.
+
 ### Added
 
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.

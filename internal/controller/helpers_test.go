@@ -55,6 +55,15 @@ func TestEndpointKeyIgnoresMetadataAndNormalizesDefaultPort(t *testing.T) {
 		t.Fatalf("default and explicit TLS port differ: %q != %q", tlsDefault, tlsExplicit)
 	}
 
+	plainDevice := endpointDeviceKey(api.RouterEndpoint{Address: "10.0.0.1", Port: 8728})
+	tlsDevice := endpointDeviceKey(api.RouterEndpoint{Address: "10.0.0.1", Port: 8729, TLS: true})
+	if plainDevice != tlsDevice {
+		t.Fatalf("same-host port/TLS change used different device keys: %q != %q", plainDevice, tlsDevice)
+	}
+	if plainDefault == tlsDefault {
+		t.Fatal("plain and TLS API connections share a connection identity")
+	}
+
 	tests := []struct {
 		name  string
 		left  string

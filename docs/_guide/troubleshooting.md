@@ -101,9 +101,10 @@ Service for node-IP NAT.
   `MikroTikRouter`
 - Duplicate endpoint errors on a single router object
 
-**Cause:** Endpoint identity is `address|port|tls`. Two `MikroTikRouter`
-objects cannot manage the same physical API endpoint. Credential rotation or
-renaming an endpoint does not count as a new device.
+**Cause:** Connection identity is `address|port|tls`. Two `MikroTikRouter`
+objects cannot manage the same physical API endpoint. Credential rotation,
+renaming an endpoint, or changing only the API port or TLS flag on the same
+address does not count as decommissioning the device.
 
 **Solution:** Keep one router object per device. Split HA pairs with different
 addresses under `spec.routers`.
