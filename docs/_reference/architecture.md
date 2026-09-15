@@ -46,7 +46,10 @@ the router has its finalizer and has recorded current endpoints in
 
 A `MikroTikRouter` may list several endpoints under `spec.routers`. All of
 them receive the same desired state. Two router objects cannot share an
-endpoint; identity is `address`, port (default `8728`/`8729`), and TLS.
+API connection; identity is `address`, port (default `8728`/`8729`), and TLS.
+Dropping a connection whose address still appears in spec (for example
+enabling API TLS on the same host) does not sweep managed DNS, NAT, routes,
+or firewall rules.
 
 ## Ownership and cleanup
 
@@ -60,7 +63,7 @@ still carry `mikrotik.operator.io/service-route`; the operator strips that
 leftover finalizer after owned route children are deleted.
 
 Router objects retain `status.appliedEndpoints` so managed entries can be
-removed during deletion or when an endpoint is dropped. If a referenced
+removed during deletion or when a host address is dropped. If a referenced
 router disappears before cleanup, the operator cannot reconnect and allows
 the Kubernetes resource to finish deletion rather than leaving a permanent
 finalizer block.

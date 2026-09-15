@@ -171,3 +171,57 @@ func TestRouterReconcilerSweepsRemovedEndpoints(t *testing.T) {
 		t.Fatalf("applied endpoints = %#v, want only %s", stored.Status.AppliedEndpoints, current.Address)
 	}
 }
+
+func TestRouterReconcilerDoesNotSweepWhenAPIPortOrTLSChanges(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	current := api.RouterEndpoint{
+		Name:              "tls",
+		Address:           "192.0.2.10",
+		Port:              8729,
+		TLS:               true,
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	removed := api.RouterEndpoint{
+		Name:              "plain",
+		Address:           "192.0.2.10",
+		Port:              8728,
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{current}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{removed, current}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	dials := 0
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret).
+		WithStatusSubresource(&router).
+		Build()
+	reconciler := RouterReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			dials++
+			return &recordingRouterClient{}, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(router.Namespace, router.Name)); err != nil {
+		t.Fatal(err)
+	}
+	var stored api.MikroTikRouter
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: router.Namespace, Name: router.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Status.AppliedEndpoints) != 1 ||
+		endpointKey(stored.Status.AppliedEndpoints[0]) != endpointKey(current) {
+		t.Fatalf("applied endpoints = %#v, want only TLS endpoint", stored.Status.AppliedEndpoints)
+	}
+	if err := ensureRouterActive(context.Background(), kube, stored); err != nil {
+		t.Fatalf("same-host TLS change left the router inactive: %v", err)
+	}
+	if dials != 0 {
+		t.Fatalf("same-host API port/TLS change swept RouterOS %d times", dials)
+	}
+}
