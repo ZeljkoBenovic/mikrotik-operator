@@ -134,6 +134,22 @@ describe('specSummary', () => {
         targetAddress: '10.0.0.8',
       }),
     ).toBe('TCP :80 → 10.0.0.8:8080')
+    expect(
+      specSummary('MikroTikPortForward', {
+        protocol: 'udp',
+        externalPort: 53,
+        targetPort: 53,
+        serviceRef: { name: 'dns' },
+      }),
+    ).toBe('UDP :53 → dns:53')
+    expect(
+      specSummary('MikroTikPortForward', {
+        protocol: 'tcp',
+        externalPort: 22,
+        targetPort: 22,
+        podRef: { name: 'ssh-0' },
+      }),
+    ).toBe('TCP :22 → ssh-0:22')
     expect(specSummary('MikroTikFirewallRule', { chain: 'forward', action: 'accept' })).toBe('forward / accept')
     expect(specSummary('Unknown', {})).toBe('—')
   })

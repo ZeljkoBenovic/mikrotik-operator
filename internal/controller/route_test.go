@@ -75,6 +75,67 @@ func TestRouteReconcilerAppliesDirectRouteWithDistance(t *testing.T) {
 	}
 }
 
+func TestRouteReconcilerAppliesToEveryEndpoint(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	primary := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	backup := api.RouterEndpoint{
+		Name:              "backup",
+		Address:           "192.0.2.11",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{primary, backup}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{primary, backup}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	route := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikRouteSpec{
+			RouterRef:   router.Name,
+			Destination: "10.0.0.8/32",
+			Gateway:     "192.0.2.1",
+			Distance:    5,
+		},
+	}
+	clients := map[string]*recordingRouterClient{
+		primary.Address: {},
+		backup.Address:  {},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &route).
+		WithStatusSubresource(&router, &route).
+		Build()
+	reconciler := RouteReconciler{Client: kube, Factory: func(_ context.Context, address string, _ int32, _ bool, _, _ string) (ros.Client, error) {
+		client, ok := clients[address]
+		if !ok {
+			t.Fatalf("unexpected router address %s", address)
+		}
+		return client, nil
+	}}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(route.Namespace, route.Name)); err != nil {
+		t.Fatal(err)
+	}
+	for address, routerClient := range clients {
+		if len(routerClient.ensuredRouteDestinations) != 1 || routerClient.ensuredRouteDestinations[0] != "10.0.0.8/32" {
+			t.Fatalf("%s destinations = %#v, want [10.0.0.8/32]", address, routerClient.ensuredRouteDestinations)
+		}
+		if len(routerClient.ensuredRouteGateways) != 1 || routerClient.ensuredRouteGateways[0] != "192.0.2.1" {
+			t.Fatalf("%s gateways = %#v, want [192.0.2.1]", address, routerClient.ensuredRouteGateways)
+		}
+	}
+}
+
 func TestRouteReconcilerRejectsMissingDestinationOrGateway(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	route := api.MikroTikRoute{

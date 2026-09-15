@@ -14,6 +14,9 @@ and the project follows semantic versioning.
 
 ### Tests
 
+- Cover DNS, Route, and PortForward apply to every multi-endpoint hop, durable
+  endpoint-history union during credential rotation, Router endpoint validation,
+  and missing-object reconcile no-ops.
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name

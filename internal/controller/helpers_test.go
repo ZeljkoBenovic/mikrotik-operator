@@ -3,11 +3,13 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
 	ros "github.com/ZeljkoBenovic/mikrotik-operator/internal/routeros"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -511,5 +513,209 @@ func TestPortForwardDestinationAddress(t *testing.T) {
 				t.Fatalf("portForwardDestinationAddress() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestValidateRouterEndpoints(t *testing.T) {
+	tests := []struct {
+		name    string
+		router  api.MikroTikRouter
+		wantErr string
+	}{
+		{
+			name:    "empty spec",
+			router:  api.MikroTikRouter{ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"}},
+			wantErr: "requires a legacy address and credentialsSecret",
+		},
+		{
+			name: "legacy address without credentials",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+				Spec:       api.MikroTikRouterSpec{Address: "192.0.2.10"},
+			},
+			wantErr: "requires a legacy address and credentialsSecret",
+		},
+		{
+			name: "routers entry with empty address",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+				Spec: api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{{
+					CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+				}}},
+			},
+			wantErr: "endpoint 0 has an empty address",
+		},
+		{
+			name: "routers entry with empty credentials",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+				Spec: api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{{
+					Address: "192.0.2.10",
+				}}},
+			},
+			wantErr: "endpoint 0 has an empty credentialsSecret",
+		},
+		{
+			name: "valid routers entry",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+				Spec: api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{{
+					Address:           "192.0.2.10",
+					CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+				}}},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateRouterEndpoints(test.router)
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestRouterEndpointsRequiresAddressAndCredentials(t *testing.T) {
+	if endpoints := routerEndpoints(api.MikroTikRouter{
+		Spec: api.MikroTikRouterSpec{Address: "192.0.2.10"},
+	}); endpoints != nil {
+		t.Fatalf("address without credentials = %#v, want nil", endpoints)
+	}
+	if endpoints := routerEndpoints(api.MikroTikRouter{
+		Spec: api.MikroTikRouterSpec{CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"}},
+	}); endpoints != nil {
+		t.Fatalf("credentials without address = %#v, want nil", endpoints)
+	}
+}
+
+func TestRouterCleanupEndpointsPrefersAppliedAndSkipsIncomplete(t *testing.T) {
+	applied := api.RouterEndpoint{
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	incomplete := api.RouterEndpoint{Address: "192.0.2.11"}
+	current := api.RouterEndpoint{
+		Address:           "192.0.2.20",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	got := routerCleanupEndpoints(api.MikroTikRouter{
+		Spec:   api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{current}},
+		Status: api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{applied, incomplete}},
+	})
+	if len(got) != 1 || endpointKey(got[0]) != endpointKey(applied) {
+		t.Fatalf("cleanup endpoints = %#v, want applied complete endpoint", got)
+	}
+
+	fallback := routerCleanupEndpoints(api.MikroTikRouter{
+		Spec: api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{current}},
+	})
+	if len(fallback) != 1 || endpointKey(fallback[0]) != endpointKey(current) {
+		t.Fatalf("empty applied history = %#v, want current spec endpoint", fallback)
+	}
+}
+
+func TestDurableRouterEndpointUnionRotatesCredentialsAndKeepsRemoved(t *testing.T) {
+	previous := []api.RouterEndpoint{
+		{Address: "192.0.2.10", CredentialsSecret: corev1.LocalObjectReference{Name: "old"}},
+		{Address: "192.0.2.11", CredentialsSecret: corev1.LocalObjectReference{Name: "old"}},
+	}
+	current := []api.RouterEndpoint{{
+		Name:              "renamed",
+		Address:           "192.0.2.10",
+		Port:              8728,
+		CredentialsSecret: corev1.LocalObjectReference{Name: "rotated"},
+	}}
+	union := durableRouterEndpointUnion(previous, current)
+	if len(union) != 2 {
+		t.Fatalf("union length = %d, want 2", len(union))
+	}
+	if endpointKey(union[0]) != endpointKey(current[0]) {
+		t.Fatalf("kept endpoint identity = %#v, want current physical endpoint", union[0])
+	}
+	if union[0].CredentialsSecret.Name != "rotated" {
+		t.Fatalf("union kept stale credentials %q", union[0].CredentialsSecret.Name)
+	}
+	if endpointKey(union[1]) != endpointKey(previous[1]) {
+		t.Fatalf("removed endpoint was dropped: %#v", union)
+	}
+
+	ipv6Previous := []api.RouterEndpoint{{Address: "2001:0db8:0:0:0:0:0:1"}}
+	ipv6Current := []api.RouterEndpoint{{Address: "2001:db8::1", Port: 8728}}
+	collapsed := durableRouterEndpointUnion(ipv6Previous, ipv6Current)
+	if len(collapsed) != 1 || collapsed[0].Address != "2001:db8::1" {
+		t.Fatalf("equivalent IPv6 endpoints were not collapsed: %#v", collapsed)
+	}
+}
+
+func TestAppendUniqueService(t *testing.T) {
+	web := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"}}
+	otherNS := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "other"}}
+	db := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "app"}}
+	got := appendUniqueService(nil, web)
+	got = appendUniqueService(got, web)
+	got = appendUniqueService(got, otherNS)
+	got = appendUniqueService(got, db)
+	if len(got) != 3 || got[0].Namespace != "app" || got[1].Namespace != "other" || got[2].Name != "db" {
+		t.Fatalf("services = %#v, want web/app, web/other, db/app", got)
+	}
+}
+
+func TestFindServicePort(t *testing.T) {
+	service := corev1.Service{Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{
+		{Name: "http", Port: 80},
+		{Name: "https", Port: 443},
+	}}}
+	got, ok := findServicePort(service, 443)
+	if !ok || got.Name != "https" {
+		t.Fatalf("findServicePort(443) = %#v ok=%t, want https", got, ok)
+	}
+	if _, ok := findServicePort(service, 22); ok {
+		t.Fatal("findServicePort(22) unexpectedly matched")
+	}
+}
+
+func TestFindIngressServicePort(t *testing.T) {
+	service := corev1.Service{Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{
+		{Name: "http", Port: 80},
+		{Name: "https", Port: 443},
+	}}}
+	byName, ok := findIngressServicePort(service, networkingv1.ServiceBackendPort{Name: "https"})
+	if !ok || byName.Port != 443 {
+		t.Fatalf("named port = %#v ok=%t, want https/443", byName, ok)
+	}
+	byNumber, ok := findIngressServicePort(service, networkingv1.ServiceBackendPort{Number: 80})
+	if !ok || byNumber.Name != "http" {
+		t.Fatalf("numeric port = %#v ok=%t, want http/80", byNumber, ok)
+	}
+	if _, ok := findIngressServicePort(service, networkingv1.ServiceBackendPort{Name: "dns"}); ok {
+		t.Fatal("missing named port unexpectedly matched")
+	}
+}
+
+func TestNormalizeGeneratedHostnameAndPublicIP(t *testing.T) {
+	if got := normalizeGeneratedHostname(" WWW.Example.COM. "); got != "www.example.com" {
+		t.Fatalf("hostname = %q, want www.example.com", got)
+	}
+	if got := normalizePublicIP(" 2001:0db8:0:0:0:0:0:1 "); got != "2001:db8::1" {
+		t.Fatalf("public IP = %q, want compressed IPv6", got)
+	}
+	if got := normalizePublicIP(" not-an-ip "); got != "not-an-ip" {
+		t.Fatalf("non-IP public IP = %q, want trimmed original", got)
+	}
+}
+
+func TestRouterReconcilerIgnoresMissingObject(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	kube := fake.NewClientBuilder().WithScheme(scheme).Build()
+	reconciler := RouterReconciler{Client: kube}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "missing")); err != nil {
+		t.Fatal(err)
 	}
 }
