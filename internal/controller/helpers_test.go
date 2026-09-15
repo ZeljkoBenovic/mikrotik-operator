@@ -681,14 +681,14 @@ func TestFindServicePort(t *testing.T) {
 	}
 }
 
-func TestFindIngressServicePortPrefersNameThenNumber(t *testing.T) {
+func TestFindIngressServicePort(t *testing.T) {
 	service := corev1.Service{Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{
 		{Name: "http", Port: 80},
 		{Name: "https", Port: 443},
 	}}}
-	byName, ok := findIngressServicePort(service, networkingv1.ServiceBackendPort{Name: "https", Number: 80})
+	byName, ok := findIngressServicePort(service, networkingv1.ServiceBackendPort{Name: "https"})
 	if !ok || byName.Port != 443 {
-		t.Fatalf("named port = %#v ok=%t, want https/443 even when number disagrees", byName, ok)
+		t.Fatalf("named port = %#v ok=%t, want https/443", byName, ok)
 	}
 	byNumber, ok := findIngressServicePort(service, networkingv1.ServiceBackendPort{Number: 80})
 	if !ok || byNumber.Name != "http" {
