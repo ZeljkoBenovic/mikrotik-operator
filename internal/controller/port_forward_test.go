@@ -72,6 +72,85 @@ func TestPortForwardReconcilerAppliesSpecDestinationAddress(t *testing.T) {
 	}
 }
 
+func TestPortForwardReconcilerAppliesNATAndFirewallToEveryEndpoint(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	primary := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	backup := api.RouterEndpoint{
+		Name:              "backup",
+		Address:           "192.0.2.11",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{primary, backup}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{primary, backup}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			RouterRef:     router.Name,
+			Protocol:      "tcp",
+			ExternalPort:  443,
+			TargetPort:    8443,
+			TargetAddress: "10.0.0.20",
+		},
+	}
+	clients := map[string]*recordingRouterClient{
+		primary.Address: {},
+		backup.Address:  {},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &forward).
+		WithStatusSubresource(&router, &forward).
+		Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: func(_ context.Context, address string, _ int32, _ bool, _, _ string) (ros.Client, error) {
+		client, ok := clients[address]
+		if !ok {
+			t.Fatalf("unexpected router address %s", address)
+		}
+		return client, nil
+	}}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name)); err != nil {
+		t.Fatal(err)
+	}
+	for address, routerClient := range clients {
+		if routerClient.ensuredForwards != 1 {
+			t.Fatalf("%s EnsurePortForward calls = %d, want 1", address, routerClient.ensuredForwards)
+		}
+		got := routerClient.ensuredPortForwards[0]
+		if got.Protocol != "tcp" || got.ExternalPort != 443 || got.Target != "10.0.0.20" || got.TargetPort != 8443 {
+			t.Fatalf("%s dst-nat = %#v", address, got)
+		}
+		if routerClient.ensuredFirewall != 1 {
+			t.Fatalf("%s EnsureFirewallRule calls = %d, want 1 companion accept", address, routerClient.ensuredFirewall)
+		}
+		rule := routerClient.ensuredFirewallRules[0]
+		if rule.Chain != "forward" || rule.Action != "accept" || rule.DestinationAddress != "10.0.0.20" {
+			t.Fatalf("%s companion firewall = %#v", address, rule)
+		}
+	}
+}
+
+func TestPortForwardReconcilerIgnoresMissingObject(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	kube := fake.NewClientBuilder().WithScheme(scheme).Build()
+	reconciler := PortForwardReconciler{Client: kube}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "missing")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPortForwardReconcilerPrefersSpecOverPublicIPAnnotation(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	endpoint := api.RouterEndpoint{

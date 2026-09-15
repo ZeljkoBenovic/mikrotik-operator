@@ -520,6 +520,82 @@ func TestDNSReconcilerSkipsClusterRoutesWhenOwnedByService(t *testing.T) {
 	}
 }
 
+func TestDNSReconcilerAppliesToEveryEndpoint(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	primary := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	backup := api.RouterEndpoint{
+		Name:              "backup",
+		Address:           "192.0.2.11",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{primary, backup}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{primary, backup}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikDNSRecordSpec{
+			RouterRef: router.Name,
+			Name:      "web.home.arpa",
+			Address:   "10.0.0.8",
+		},
+	}
+	clients := map[string]*recordingRouterClient{
+		primary.Address: {},
+		backup.Address:  {},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &record).
+		WithStatusSubresource(&router, &record).
+		Build()
+	reconciler := DNSReconciler{Client: kube, Factory: func(_ context.Context, address string, _ int32, _ bool, _, _ string) (ros.Client, error) {
+		client, ok := clients[address]
+		if !ok {
+			t.Fatalf("unexpected router address %s", address)
+		}
+		return client, nil
+	}}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
+		t.Fatal(err)
+	}
+	for address, routerClient := range clients {
+		if routerClient.ensuredDNS != 1 {
+			t.Fatalf("%s EnsureDNS calls = %d, want 1", address, routerClient.ensuredDNS)
+		}
+		if len(routerClient.ensuredDNSAddresses) != 1 || routerClient.ensuredDNSAddresses[0] != "10.0.0.8" {
+			t.Fatalf("%s DNS addresses = %#v, want [10.0.0.8]", address, routerClient.ensuredDNSAddresses)
+		}
+	}
+	var stored api.MikroTikDNSRecord
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Status.Applied {
+		t.Fatalf("status = %#v, want applied", stored.Status)
+	}
+}
+
+func TestDNSReconcilerIgnoresMissingObject(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	kube := fake.NewClientBuilder().WithScheme(scheme).Build()
+	reconciler := DNSReconciler{Client: kube}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "missing")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func annotatedClusterIPFixture() (corev1.Service, api.MikroTikRouter, corev1.Node) {
 	service := corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
