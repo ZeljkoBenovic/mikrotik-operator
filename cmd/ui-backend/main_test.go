@@ -95,8 +95,18 @@ func TestLoadRESTConfigEmptyUsesInCluster(t *testing.T) {
 func TestNewSchemeIncludesOperatorTypes(t *testing.T) {
 	t.Parallel()
 	scheme := newScheme()
-	if !scheme.Recognizes(api.GroupVersion.WithKind("MikroTikRouter")) {
-		t.Fatal("scheme missing MikroTikRouter")
+	for _, kind := range []string{
+		"MikroTikRouter",
+		"MikroTikDNSRecord",
+		"MikroTikRoute",
+		"MikroTikPortForward",
+		"MikroTikFirewallRule",
+		"MikroTikBackup",
+		"MikroTikRestore",
+	} {
+		if !scheme.Recognizes(api.GroupVersion.WithKind(kind)) {
+			t.Fatalf("scheme missing %s", kind)
+		}
 	}
 }
 

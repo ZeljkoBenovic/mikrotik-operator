@@ -427,6 +427,24 @@ func TestRouterKeyFromRefNeverReturnsSlashName(t *testing.T) {
 			reference: "local-router",
 			want:      types.NamespacedName{Namespace: "mikrotik", Name: "local-router"},
 		},
+		{
+			name:      "whitespace around bare name",
+			namespace: "mikrotik",
+			reference: "  local-router  ",
+			want:      types.NamespacedName{Namespace: "mikrotik", Name: "local-router"},
+		},
+		{
+			name:      "whitespace around namespace/name",
+			namespace: "mikrotik-operator-system",
+			reference: "  mikrotik/local-router  ",
+			want:      types.NamespacedName{Namespace: "mikrotik", Name: "local-router"},
+		},
+		{
+			name:      "empty reference",
+			namespace: "mikrotik",
+			reference: "   ",
+			want:      types.NamespacedName{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

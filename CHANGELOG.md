@@ -18,6 +18,10 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover `MikroTikPortForward` companion forward-accept apply and deletion of
+  both dst-nat and the accept rule, Gateway hostname trailing-dot/case
+  intersection, restore-script path/quote parsing, empty-TTL DNS skip, and
+  HTTPRoute backend port uniqueness.
 
 ## [0.4.0] - 2026-09-01
 

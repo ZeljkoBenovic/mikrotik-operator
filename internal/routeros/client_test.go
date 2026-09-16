@@ -762,6 +762,29 @@ func TestEnsureDNS_AddsWhenMissingAndSkipsWhenMatching(t *testing.T) {
 	}
 }
 
+func TestEnsureDNS_EmptyTTLSkipsWhenAddressMatches(t *testing.T) {
+	comment := ManagedComment("dns", "web", "apps")
+	existing := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{
+			"name":    "web.example.com",
+			"address": "10.0.0.8",
+			"ttl":     "1d",
+			"comment": comment,
+		},
+	}}}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{{reply: existing}},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	if err := api.EnsureDNS(context.Background(), "web.example.com", "10.0.0.8", "", comment); err != nil {
+		t.Fatalf("EnsureDNS() skip error = %v", err)
+	}
+	if len(client.calls) != 1 || client.calls[0][0] != "/ip/dns/static/print" {
+		t.Fatalf("empty TTL against matching address issued %v", client.calls)
+	}
+}
+
 func TestEnsureFirewallRule_AddsOptionalMatchersAndSkipsWhenMatching(t *testing.T) {
 	comment := ManagedComment("firewall", "web", "apps")
 	empty := &routeros.Reply{}

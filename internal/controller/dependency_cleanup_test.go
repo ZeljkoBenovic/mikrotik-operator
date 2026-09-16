@@ -400,6 +400,7 @@ type recordingRouterClient struct {
 	ensuredRouteDistances    []int32
 	deletedRouteComments     []string
 	ensuredPortForwards      []ros.PortForward
+	deletedForwardComments   []string
 	ensuredFirewallRules     []ros.FirewallRule
 	ensuredFirewallComments  []string
 	deletedFirewallComments  []string
@@ -424,8 +425,9 @@ func (client *recordingRouterClient) EnsurePortForward(_ context.Context, forwar
 	client.ensuredPortForwards = append(client.ensuredPortForwards, forward)
 	return nil
 }
-func (client *recordingRouterClient) DeletePortForward(context.Context, string) error {
+func (client *recordingRouterClient) DeletePortForward(_ context.Context, comment string) error {
 	client.deletedForwards++
+	client.deletedForwardComments = append(client.deletedForwardComments, comment)
 	return nil
 }
 func (*recordingRouterClient) EnsureRoute(context.Context, string, string, string) error { return nil }
