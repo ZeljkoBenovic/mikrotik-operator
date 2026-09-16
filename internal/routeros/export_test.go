@@ -209,6 +209,71 @@ func TestRestoreStatements_JoinsBackslashContinuation(t *testing.T) {
 	}
 }
 
+func TestRestoreStatements_QuotedBracesAndEscapesDoNotKeepStatementOpen(t *testing.T) {
+	t.Parallel()
+	script := "/ip firewall filter\nadd comment=\"has { brace\" chain=input\nadd comment=\"say \\\"hi\\\"\" chain=output\n"
+	got, err := restoreStatements(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("statements = %#v", got)
+	}
+	if !strings.Contains(got[1], `comment="has { brace"`) {
+		t.Fatalf("quoted brace was not a single statement: %#v", got[1])
+	}
+	if !strings.Contains(got[2], `comment="say \"hi\""`) {
+		t.Fatalf("escaped quotes were not a single statement: %#v", got[2])
+	}
+}
+
+func TestRestoreStatements_NormalizesCRLF(t *testing.T) {
+	t.Parallel()
+	script := "/ip address\r\nadd address=10.0.0.1/32 interface=lo\r\n"
+	got, err := restoreStatements(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("statements = %#v", got)
+	}
+	if got[0] != "/ip address" || !strings.Contains(got[1], "add address=10.0.0.1/32") {
+		t.Fatalf("CRLF statements = %#v", got)
+	}
+}
+
+func TestRestorePathAndCommentLines(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		stmt        string
+		wantPath    bool
+		wantComment bool
+		wantVerb    string
+	}{
+		{name: "path only", stmt: "/ip firewall filter", wantPath: true},
+		{name: "add command", stmt: "/ip firewall filter add chain=input", wantVerb: "add"},
+		{name: "set after path token", stmt: "/ip dns set servers=1.1.1.1", wantVerb: "set"},
+		{name: "comment", stmt: "# keep this", wantComment: true},
+		{name: "comment with leading space", stmt: "  # note", wantComment: true},
+		{name: "empty", stmt: "   "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := restorePathLine(tt.stmt); got != tt.wantPath {
+				t.Fatalf("restorePathLine(%q)=%t, want %t", tt.stmt, got, tt.wantPath)
+			}
+			if got := restoreCommentLine(tt.stmt); got != tt.wantComment {
+				t.Fatalf("restoreCommentLine(%q)=%t, want %t", tt.stmt, got, tt.wantComment)
+			}
+			if got := restoreLineVerb(strings.TrimSpace(firstRestoreLine(tt.stmt))); got != tt.wantVerb {
+				t.Fatalf("restoreLineVerb(%q)=%q, want %q", tt.stmt, got, tt.wantVerb)
+			}
+		})
+	}
+}
+
 func TestSplitRestoreScript_RejectsStatementOverLimit(t *testing.T) {
 	t.Parallel()
 	huge := "/ip firewall filter\nadd comment=\"" + strings.Repeat("x", maxRestoreFileContentsBytes) + "\"\n"

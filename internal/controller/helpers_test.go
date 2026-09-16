@@ -485,6 +485,35 @@ func TestAppendUniqueServicePort(t *testing.T) {
 	}
 }
 
+func TestFindServicePortMatchesNumberOnly(t *testing.T) {
+	service := corev1.Service{
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{Name: "http", Port: 80, Protocol: corev1.ProtocolTCP},
+				{Name: "https", Port: 443, Protocol: corev1.ProtocolTCP},
+			},
+		},
+	}
+	got, ok := findServicePort(service, 443)
+	if !ok || got.Name != "https" || got.Port != 443 {
+		t.Fatalf("findServicePort(443) = %#v ok=%t", got, ok)
+	}
+	if _, ok := findServicePort(service, 8080); ok {
+		t.Fatal("findServicePort(8080) matched a missing port")
+	}
+}
+
+func TestAppendUniqueServiceKeepsCrossNamespaceNames(t *testing.T) {
+	appWeb := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"}}
+	otherWeb := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "other"}}
+	got := appendUniqueService(nil, appWeb)
+	got = appendUniqueService(got, appWeb)
+	got = appendUniqueService(got, otherWeb)
+	if len(got) != 2 || got[0].Namespace != "app" || got[1].Namespace != "other" {
+		t.Fatalf("services = %#v, want app/web and other/web", got)
+	}
+}
+
 func TestPortForwardDestinationAddress(t *testing.T) {
 	tests := []struct {
 		name  string
