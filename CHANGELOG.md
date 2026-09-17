@@ -18,6 +18,9 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover Router connect/fail status after a durable endpoint snapshot, `/export`
+  version detection from `!done` sentences, and Admin UI PUT keeping generated
+  child ownerReferences and labels.
 
 ## [0.4.0] - 2026-09-01
 
