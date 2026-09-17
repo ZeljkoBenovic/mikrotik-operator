@@ -56,6 +56,65 @@ func versionReply(version string) scriptedRouterOSResponse {
 	}
 }
 
+func TestResourceVersion(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		reply *routeros.Reply
+		want  string
+	}{
+		{name: "nil reply"},
+		{
+			name:  "version in Re is trimmed",
+			reply: &routeros.Reply{Re: []*proto.Sentence{{Map: map[string]string{"version": " 7.16.2 "}}}},
+			want:  "7.16.2",
+		},
+		{
+			name: "nil and empty Re sentences fall through to Done",
+			reply: &routeros.Reply{
+				Re:   []*proto.Sentence{nil, {Map: map[string]string{"version": ""}}},
+				Done: &proto.Sentence{Map: map[string]string{"version": " 7.1 "}},
+			},
+			want: "7.1",
+		},
+		{
+			name:  "empty reply",
+			reply: &routeros.Reply{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := resourceVersion(tt.reply); got != tt.want {
+				t.Fatalf("resourceVersion() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRouterOSMajorVersion(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		version string
+		want    int
+	}{
+		{name: "empty"},
+		{name: "v6 patch", version: "6.49.18", want: 6},
+		{name: "v7 with channel suffix", version: " 7.16.2 (stable)", want: 7},
+		{name: "non-numeric prefix", version: "v7.1"},
+		{name: "rc suffix after major", version: "7rc1", want: 7},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := routerOSMajorVersion(tt.version); got != tt.want {
+				t.Fatalf("routerOSMajorVersion(%q) = %d, want %d", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExport_UsesCompactThenStoresScript(t *testing.T) {
 	scripted := &scriptedRouterOSClient{
 		responses: []scriptedRouterOSResponse{
@@ -124,6 +183,23 @@ func TestExport_V7AddsShowSensitive(t *testing.T) {
 	want := []string{"/export", "=compact=", "=show-sensitive="}
 	if !sameArgs(scripted.calls[1], want) {
 		t.Fatalf("v7 export args = %#v, want %#v", scripted.calls[1], want)
+	}
+}
+
+func TestExport_V7VersionInDoneSentenceAddsShowSensitive(t *testing.T) {
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: &routeros.Reply{Done: &proto.Sentence{Map: map[string]string{"version": "7.16.2 (stable)"}}}},
+			{reply: &routeros.Reply{Done: &proto.Sentence{Map: map[string]string{"ret": "/user\n"}}}},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	if _, err := api.Export(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/export", "=compact=", "=show-sensitive="}
+	if len(scripted.calls) < 2 || !sameArgs(scripted.calls[1], want) {
+		t.Fatalf("v7 Done-sentence export args = %#v, want %#v", scripted.calls, want)
 	}
 }
 
