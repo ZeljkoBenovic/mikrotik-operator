@@ -236,6 +236,61 @@ func TestUpdatePreservesFinalizers(t *testing.T) {
 	}
 }
 
+func TestUpdatePreservesOwnerReferencesAndLabels(t *testing.T) {
+	t.Parallel()
+	record := &api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ing-web",
+			Namespace: "app",
+			Labels: map[string]string{
+				"mikrotik.operator.io/ingress": "public",
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "networking.k8s.io/v1",
+				Kind:       "Ingress",
+				Name:       "public",
+				UID:        "ingress-uid",
+			}},
+		},
+		Spec: api.MikroTikDNSRecordSpec{
+			Name:      "web.example.com",
+			Address:   "10.0.0.8",
+			RouterRef: "edge",
+		},
+	}
+	h := newTestHandler(t, record)
+
+	rec := doRequest(t, h, http.MethodPut, "/api/resources/mikrotikdnsrecords/app/ing-web", `{
+		"metadata":{"name":"ing-web","labels":{},"ownerReferences":[]},
+		"spec":{"name":"web.example.com","address":"10.0.0.9","routerRef":"edge"}
+	}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+
+	got := doRequest(t, h, http.MethodGet, "/api/resources/mikrotikdnsrecords/app/ing-web", "")
+	if got.Code != http.StatusOK {
+		t.Fatalf("get status %d %s", got.Code, got.Body.String())
+	}
+	body := decodeMap(t, got)
+	if asMap(t, body["spec"])["address"] != "10.0.0.9" {
+		t.Fatalf("spec.address after update %#v", body["spec"])
+	}
+	meta := asMap(t, body["metadata"])
+	labels := asMap(t, meta["labels"])
+	if labels["mikrotik.operator.io/ingress"] != "public" {
+		t.Fatalf("labels = %#v, want ingress ownership label kept", meta["labels"])
+	}
+	owners := sliceField(t, meta, "ownerReferences")
+	if len(owners) != 1 {
+		t.Fatalf("ownerReferences = %#v, want the Ingress controller owner", meta["ownerReferences"])
+	}
+	owner := asMap(t, owners[0])
+	if owner["kind"] != "Ingress" || owner["name"] != "public" {
+		t.Fatalf("ownerReference = %#v, want Ingress/public", owner)
+	}
+}
+
 func TestDuplicateCreateConflict(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(t, readyRouter("app", "edge"))

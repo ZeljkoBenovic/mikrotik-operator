@@ -128,6 +128,204 @@ func TestRouterPersistsEndpointSnapshotBeforeExternalAccess(t *testing.T) {
 	}
 }
 
+func TestRouterReconcilerMarksConnectedAfterSuccessfulDial(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		Port:              8729,
+		TLS:               true,
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"},
+		Data: map[string][]byte{
+			"username": []byte("admin"),
+			"password": []byte("s3cret"),
+		},
+	}
+	routerClient := &recordingRouterClient{}
+	var dials []routerDial
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret).
+		WithStatusSubresource(&api.MikroTikRouter{}).
+		Build()
+	reconciler := RouterReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Factory: func(_ context.Context, address string, port int32, useTLS bool, username, password string) (ros.Client, error) {
+			dials = append(dials, routerDial{address: address, port: port, tls: useTLS, username: username, password: password})
+			return routerClient, nil
+		},
+	}
+	request := reconcile.Request{NamespacedName: types.NamespacedName{Name: router.Name, Namespace: router.Namespace}}
+
+	result, err := reconciler.Reconcile(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RequeueAfter != driftCheckInterval {
+		t.Fatalf("RequeueAfter = %s, want %s", result.RequeueAfter, driftCheckInterval)
+	}
+	assertRouterDial(t, dials, endpoint.Address, endpoint.Port, true, "admin", "s3cret")
+	if routerClient.closed != 1 {
+		t.Fatalf("Close calls = %d, want 1", routerClient.closed)
+	}
+	var stored api.MikroTikRouter
+	if err := kube.Get(context.Background(), request.NamespacedName, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Status.Connected {
+		t.Fatal("router was not marked connected after a successful dial")
+	}
+	if len(stored.Status.Conditions) != 1 ||
+		stored.Status.Conditions[0].Type != "Ready" ||
+		stored.Status.Conditions[0].Status != metav1.ConditionTrue ||
+		stored.Status.Conditions[0].Reason != "Connected" {
+		t.Fatalf("ready condition = %#v", stored.Status.Conditions)
+	}
+
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if len(dials) != 2 {
+		t.Fatalf("drift reconcile dialed %d times, want 2", len(dials))
+	}
+	if routerClient.closed != 2 {
+		t.Fatalf("Close calls after drift check = %d, want 2", routerClient.closed)
+	}
+}
+
+func TestRouterReconcilerFailsStatusWhenDialFails(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status: api.MikroTikRouterStatus{
+			Connected:        true,
+			AppliedEndpoints: []api.RouterEndpoint{endpoint},
+			Conditions: []metav1.Condition{{
+				Type:   "Ready",
+				Status: metav1.ConditionTrue,
+				Reason: "Connected",
+			}},
+		},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	dials := 0
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret).
+		WithStatusSubresource(&api.MikroTikRouter{}).
+		Build()
+	reconciler := RouterReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			dials++
+			return nil, errors.New("tls handshake timeout")
+		},
+	}
+	request := reconcile.Request{NamespacedName: types.NamespacedName{Name: router.Name, Namespace: router.Namespace}}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if dials != 1 {
+		t.Fatalf("dial attempts = %d, want 1", dials)
+	}
+	var stored api.MikroTikRouter
+	if err := kube.Get(context.Background(), request.NamespacedName, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status.Connected {
+		t.Fatal("failed dial left Status.Connected=true")
+	}
+	if len(stored.Status.Conditions) != 1 ||
+		stored.Status.Conditions[0].Status != metav1.ConditionFalse ||
+		stored.Status.Conditions[0].Reason != "ConnectionFailed" {
+		t.Fatalf("ready condition = %#v", stored.Status.Conditions)
+	}
+	if stored.Status.Conditions[0].Message != "tls handshake timeout" {
+		t.Fatalf("failure message = %q", stored.Status.Conditions[0].Message)
+	}
+}
+
+func TestRouterReconcilerFailsStatusWhenCredentialsSecretIsMissing(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	dials := 0
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router).
+		WithStatusSubresource(&api.MikroTikRouter{}).
+		Build()
+	reconciler := RouterReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			dials++
+			return nil, errors.New("must not dial without credentials")
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: router.Name, Namespace: router.Namespace},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if dials != 0 {
+		t.Fatalf("missing credentials secret still dialed %d times", dials)
+	}
+	var stored api.MikroTikRouter
+	if err := kube.Get(context.Background(), types.NamespacedName{Name: router.Name, Namespace: router.Namespace}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status.Connected {
+		t.Fatal("missing credentials secret left Status.Connected=true")
+	}
+	if len(stored.Status.Conditions) != 1 || stored.Status.Conditions[0].Reason != "ConnectionFailed" {
+		t.Fatalf("ready condition = %#v", stored.Status.Conditions)
+	}
+}
+
+type routerDial struct {
+	address  string
+	port     int32
+	tls      bool
+	username string
+	password string
+}
+
+func assertRouterDial(t *testing.T, dials []routerDial, address string, port int32, tls bool, username, password string) {
+	t.Helper()
+	if len(dials) != 1 {
+		t.Fatalf("dials = %#v, want 1 call", dials)
+	}
+	got := dials[0]
+	if got.address != address || got.port != port || got.tls != tls || got.username != username || got.password != password {
+		t.Fatalf("dial = %#v, want address=%s port=%d tls=%t user=%s", got, address, port, tls, username)
+	}
+}
+
 func TestRouterEndpointChangeStatusConflictBlocksNewEndpointWrites(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := api.AddToScheme(scheme); err != nil {

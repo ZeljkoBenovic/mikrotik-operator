@@ -407,6 +407,7 @@ type recordingRouterClient struct {
 	imported                 []string
 	exportErr                error
 	importErr                error
+	closed                   int
 }
 
 func (client *recordingRouterClient) EnsureDNS(_ context.Context, _, address, _, _ string) error {
@@ -479,4 +480,7 @@ func (client *recordingRouterClient) Import(_ context.Context, script string) er
 	client.imported = append(client.imported, script)
 	return nil
 }
-func (*recordingRouterClient) Close() error { return nil }
+func (client *recordingRouterClient) Close() error {
+	client.closed++
+	return nil
+}
