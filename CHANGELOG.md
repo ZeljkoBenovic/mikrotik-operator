@@ -12,12 +12,19 @@ and the project follows semantic versioning.
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
   Operator `appVersion` remains `v0.4.0`.
 
+### Fixed
+
+- Bump `google.golang.org/grpc` to `v1.83.1` (GO-2026-6348).
+
 ### Tests
 
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover router operation fence serialization, canceled-waiter cleanup, re-read
+  after waiting, and cleanup connections that skip dialing when no usable
+  endpoints remain.
 
 ## [0.4.0] - 2026-09-01
 
