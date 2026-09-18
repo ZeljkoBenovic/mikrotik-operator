@@ -18,6 +18,9 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover router operation fence serialization, canceled-waiter cleanup, re-read
+  after waiting, and cleanup connections that skip dialing when no usable
+  endpoints remain.
 
 ## [0.4.0] - 2026-09-01
 
