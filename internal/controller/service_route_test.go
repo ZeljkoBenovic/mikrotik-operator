@@ -520,6 +520,15 @@ func TestDNSReconcilerSkipsClusterRoutesWhenOwnedByService(t *testing.T) {
 	}
 }
 
+func TestDNSReconcilerIgnoresMissingObject(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	kube := fake.NewClientBuilder().WithScheme(scheme).Build()
+	reconciler := DNSReconciler{Client: kube}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "missing")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func annotatedClusterIPFixture() (corev1.Service, api.MikroTikRouter, corev1.Node) {
 	service := corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{

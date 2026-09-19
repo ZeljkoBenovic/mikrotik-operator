@@ -94,6 +94,40 @@ describe('form conversion', () => {
       spec: { podRef: { namespace: 'app', name: 'web-0' }, protocol: 'tcp' },
     } as ResourceObject)
     expect(fromResource.spec.targetType).toBe('pod')
+
+    const fromService = formFromResource(forwards, {
+      metadata: { name: 'web', namespace: 'app' },
+      spec: { serviceRef: { namespace: 'app', name: 'web' }, protocol: 'tcp' },
+    } as ResourceObject)
+    expect(fromService.spec.targetType).toBe('service')
+
+    const fromAddressWithServiceRef = formFromResource(forwards, {
+      metadata: { name: 'web', namespace: 'app' },
+      spec: {
+        targetAddress: '10.0.0.8',
+        serviceRef: { namespace: 'app', name: 'web' },
+        protocol: 'tcp',
+      },
+    } as ResourceObject)
+    expect(fromAddressWithServiceRef.spec.targetType).toBe('address')
+
+    const pod = resourceFromForm(forwards, {
+      name: 'web',
+      namespace: 'app',
+      spec: {
+        targetType: 'pod',
+        targetAddress: '10.0.0.8',
+        serviceRef: { namespace: 'app', name: 'web' },
+        podRef: { namespace: 'app', name: 'web-0' },
+        protocol: 'tcp',
+        routerRef: 'edge',
+        externalPort: 80,
+        targetPort: 80,
+      },
+    })
+    expect(pod.spec.targetAddress).toBeUndefined()
+    expect(pod.spec.serviceRef).toBeUndefined()
+    expect(pod.spec.podRef).toEqual({ namespace: 'app', name: 'web-0' })
   })
 
   it('detects single vs multi router mode from the resource', () => {
@@ -107,5 +141,21 @@ describe('form conversion', () => {
       spec: { routers: [{ address: '192.0.2.10' }] },
     } as ResourceObject)
     expect(multi.spec.endpointMode).toBe('multi')
+  })
+
+  it('strips routers[] when using a single endpoint', () => {
+    const body = resourceFromForm(routers, {
+      name: 'edge',
+      namespace: 'app',
+      spec: {
+        endpointMode: 'single',
+        address: '192.0.2.10',
+        credentialsSecret: { name: 'creds' },
+        routers: [{ name: 'a', address: '192.0.2.11', credentialsSecret: { name: 'creds' } }],
+      },
+    })
+    expect(body.spec.routers).toBeUndefined()
+    expect(body.spec.address).toBe('192.0.2.10')
+    expect(body.spec.endpointMode).toBeUndefined()
   })
 })
