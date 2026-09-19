@@ -513,3 +513,69 @@ func TestPortForwardDestinationAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeGeneratedHostname(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", want: ""},
+		{name: "whitespace", input: "  ", want: ""},
+		{name: "lowercases and trims trailing dot", input: "  WWW.Example.COM.  ", want: "www.example.com"},
+		{name: "keeps inner dots", input: "foo.bar.example.com", want: "foo.bar.example.com"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := normalizeGeneratedHostname(test.input); got != test.want {
+				t.Fatalf("normalizeGeneratedHostname(%q) = %q, want %q", test.input, got, test.want)
+			}
+		})
+	}
+}
+
+func TestNormalizePublicIP(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", want: ""},
+		{name: "ipv4", input: "  203.0.113.10  ", want: "203.0.113.10"},
+		{name: "ipv6 compressed", input: "2001:db8:0:0:0:0:0:1", want: "2001:db8::1"},
+		{name: "invalid hostname passthrough", input: "  edge.example.com  ", want: "edge.example.com"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := normalizePublicIP(test.input); got != test.want {
+				t.Fatalf("normalizePublicIP(%q) = %q, want %q", test.input, got, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateGeneratedDNSCandidatesNormalizesHostnameCollisions(t *testing.T) {
+	err := validateGeneratedDNSCandidates("ingress/public", []generatedDNSCandidate{
+		{hostname: "WWW.Example.COM.", service: types.NamespacedName{Namespace: "app", Name: "web"}, address: "10.0.0.8"},
+		{hostname: "www.example.com", service: types.NamespacedName{Namespace: "app", Name: "api"}, address: "10.0.0.9"},
+	})
+	if !errors.Is(err, errGeneratedChildAmbiguity) {
+		t.Fatalf("got %v, want %v", err, errGeneratedChildAmbiguity)
+	}
+
+	err = validateGeneratedDNSCandidates("ingress/public", []generatedDNSCandidate{
+		{hostname: "WWW.Example.COM.", service: types.NamespacedName{Namespace: "app", Name: "web"}, address: "10.0.0.8"},
+		{hostname: "www.example.com", service: types.NamespacedName{Namespace: "app", Name: "web"}, address: "10.0.0.8"},
+	})
+	if err != nil {
+		t.Fatalf("same normalized target should be accepted: %v", err)
+	}
+
+	err = validateGeneratedDNSCandidates("ingress/public", []generatedDNSCandidate{
+		{hostname: "", service: types.NamespacedName{Namespace: "app", Name: "web"}, address: "10.0.0.8"},
+		{hostname: "www.example.com", service: types.NamespacedName{Namespace: "app", Name: "web"}, address: corev1.ClusterIPNone},
+	})
+	if err != nil {
+		t.Fatalf("empty hostname and headless address should be skipped: %v", err)
+	}
+}

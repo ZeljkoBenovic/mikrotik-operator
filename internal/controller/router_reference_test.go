@@ -472,3 +472,65 @@ func TestGetMikroTikRouterRejectsSlashInName(t *testing.T) {
 		t.Fatalf("error %v is not a not-found error", err)
 	}
 }
+
+func TestResolveRouterReferenceRejectsAmbiguousNameOnlyClusterMatch(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	first := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "network"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.168.88.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	second := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "core"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "10.0.0.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&first, &second).Build()
+	_, err := resolveRouterReference(context.Background(), kube, "app", "edge")
+	if !errors.Is(err, errImplicitRouterSelection) {
+		t.Fatalf("got %v want %v", err, errImplicitRouterSelection)
+	}
+}
+
+func TestResolveRouterReferencePrefersLiveLocalWhenPeerIsTerminating(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	now := metav1.Now()
+	terminating := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "old",
+			Namespace:         "app",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"mikrotik.operator.io/finalizer"},
+		},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "10.0.0.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	live := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.168.88.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&terminating, &live).Build()
+	got, err := resolveRouterReference(context.Background(), kube, "app", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := types.NamespacedName{Namespace: "app", Name: "edge"}
+	if got != want {
+		t.Fatalf("got %#v want %#v", got, want)
+	}
+}

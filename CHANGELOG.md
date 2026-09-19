@@ -14,6 +14,12 @@ and the project follows semantic versioning.
 
 ### Tests
 
+- Cover name-only `routerRef` ambiguity when two live routers share a name,
+  implicit selection that skips a terminating peer in the same namespace,
+  generated DNS hostname/public-IP normalization, Admin UI allowlist exclusion
+  of Backup/Restore (export secrets), submit-body annotation preservation, and
+  port-forward form target inference when `serviceRef` is combined with
+  `targetAddress`.
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name

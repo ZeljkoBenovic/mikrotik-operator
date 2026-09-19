@@ -150,6 +150,10 @@ describe('omitEmpty and toSubmitBody', () => {
         resourceVersion: '9',
         uid: 'should-drop',
         labels: { app: 'edge' },
+        annotations: {
+          'mikrotik.operator.io/public-ip': '203.0.113.10',
+          'mikrotik.operator.io/router-ref': 'edge',
+        },
       },
       spec: {
         address: '192.0.2.10',
@@ -164,6 +168,10 @@ describe('omitEmpty and toSubmitBody', () => {
     expect(submitted.managedBy).toBeUndefined()
     expect(submitted.metadata.uid).toBeUndefined()
     expect(submitted.metadata.resourceVersion).toBe('9')
+    expect(submitted.metadata.annotations).toEqual({
+      'mikrotik.operator.io/public-ip': '203.0.113.10',
+      'mikrotik.operator.io/router-ref': 'edge',
+    })
     expect(submitted.spec).toEqual({
       address: '192.0.2.10',
       credentialsSecret: { name: 'creds' },

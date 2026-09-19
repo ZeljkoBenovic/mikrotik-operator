@@ -55,6 +55,10 @@ func TestLookupKindRejectsUnknownAndAliasedNames(t *testing.T) {
 		"mikrotikrouters ",
 		"mikrotik-routers",
 		"configmaps",
+		"mikrotikbackups",
+		"mikrotikrestores",
+		"MikroTikBackup",
+		"MikroTikRestore",
 	}
 	for _, kind := range tests {
 		t.Run(kind, func(t *testing.T) {
@@ -90,5 +94,18 @@ func TestLookupKindKnownPlurals(t *testing.T) {
 				t.Fatalf("gvk %#v", spec.gvk)
 			}
 		})
+	}
+}
+
+func TestLookupKindOmitsBackupAndRestore(t *testing.T) {
+	t.Parallel()
+
+	// Backup status.export can contain RouterOS passwords and certificates.
+	// The Admin UI allowlist must not grow these kinds without an explicit
+	// decision to redact that field.
+	for _, plural := range []string{"mikrotikbackups", "mikrotikrestores"} {
+		if _, ok := lookupKind(plural); ok {
+			t.Fatalf("lookupKind(%q) succeeded; backup/restore must stay off the UI API", plural)
+		}
 	}
 }
