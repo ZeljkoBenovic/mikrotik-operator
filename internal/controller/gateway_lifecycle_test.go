@@ -247,6 +247,126 @@ func TestCleanupOwnedChildrenPreservesUnownedLabelCollisions(t *testing.T) {
 	assertExists(t, kube, &api.MikroTikPortForward{}, "app", "unowned-pf")
 }
 
+func TestIngressReconcilerDoesNotRecreateChildrenWhileTerminating(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	className := api.IngressClassName
+	ingressClass := networkingv1.IngressClass{
+		ObjectMeta: metav1.ObjectMeta{Name: className},
+		Spec:       networkingv1.IngressClassSpec{Controller: api.IngressController},
+	}
+	ingress := networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "web",
+			Namespace:  "app",
+			UID:        "ingress-uid",
+			Finalizers: []string{"ingress.kubernetes.io/finalizer"},
+		},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: &className,
+			Rules:            []networkingv1.IngressRule{ingressRuleForService("web.home.arpa", "backend", 80)},
+		},
+	}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8", Ports: []corev1.ServicePort{{Port: 80}}},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&ingressClass, &ingress, &service, &router, &node).Build()
+	reconciler := IngressReconciler{Client: kube, RuntimeScheme: scheme}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(ingress.Namespace, ingress.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if got := ownedRoutes(t, kube, &ingress); len(got) == 0 {
+		t.Fatal("expected owned children before Ingress deletion")
+	}
+
+	if err := kube.Delete(context.Background(), &ingress); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(ingress.Namespace, ingress.Name)); err != nil {
+		t.Fatal(err)
+	}
+	assertNoOwnedGeneratedChildren(t, kube, &ingress, "ingress", ingress.Name, "ingress/"+ingress.Name)
+
+	if err := deleteOwnedGeneratedChildren(t, kube, &ingress); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(ingress.Namespace, ingress.Name)); err != nil {
+		t.Fatal(err)
+	}
+	assertNoOwnedGeneratedChildren(t, kube, &ingress, "ingress", ingress.Name, "ingress/"+ingress.Name)
+}
+
+func TestHTTPRouteReconcilerDoesNotRecreateChildrenWhileTerminating(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	gatewayClass, gateway := mikroTikGatewayFixture()
+	hostname := gatewayv1.Hostname("web.home.arpa")
+	route := gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "route",
+			Namespace:  "app",
+			UID:        "route-uid",
+			Finalizers: []string{"gateway.networking.k8s.io/finalizer"},
+		},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge"}}},
+			Hostnames:       []gatewayv1.Hostname{hostname},
+			Rules: []gatewayv1.HTTPRouteRule{{BackendRefs: []gatewayv1.HTTPBackendRef{
+				httpBackendRef("backend", "", 80),
+			}}},
+		},
+	}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{ClusterIP: "10.0.0.8", Ports: []corev1.ServicePort{{Port: 80}}},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway, &route, &service, &router, &node).Build()
+	reconciler := HTTPRouteReconciler{Client: kube, Scheme: scheme}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(route.Namespace, route.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if got := ownedRoutes(t, kube, &route); len(got) == 0 {
+		t.Fatal("expected owned children before HTTPRoute deletion")
+	}
+
+	if err := kube.Delete(context.Background(), &route); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(route.Namespace, route.Name)); err != nil {
+		t.Fatal(err)
+	}
+	assertNoOwnedGeneratedChildren(t, kube, &route, "httproute", route.Name, "httproute/"+route.Name)
+
+	if err := deleteOwnedGeneratedChildren(t, kube, &route); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(route.Namespace, route.Name)); err != nil {
+		t.Fatal(err)
+	}
+	assertNoOwnedGeneratedChildren(t, kube, &route, "httproute", route.Name, "httproute/"+route.Name)
+}
+
 func TestIngressMissingClassCleansOwnedChildren(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	className := api.IngressClassName
@@ -752,15 +872,15 @@ func ingressRuleForService(host, service string, port int32) networkingv1.Ingres
 
 func mikroTikGatewayFixture() (gatewayv1.GatewayClass, gatewayv1.Gateway) {
 	return gatewayv1.GatewayClass{
-		ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
-		Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
-	}, gatewayv1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
-		Spec: gatewayv1.GatewaySpec{
-			GatewayClassName: api.GatewayClassName,
-			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
-		},
-	}
+			ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
+			Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
+		}, gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: api.GatewayClassName,
+				Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+			},
+		}
 }
 
 func httpBackendRef(name string, namespace gatewayv1.Namespace, port gatewayv1.PortNumber) gatewayv1.HTTPBackendRef {
@@ -769,6 +889,47 @@ func httpBackendRef(name string, namespace gatewayv1.Namespace, port gatewayv1.P
 		reference.Namespace = &namespace
 	}
 	return gatewayv1.HTTPBackendRef{BackendRef: gatewayv1.BackendRef{BackendObjectReference: reference}}
+}
+
+func deleteOwnedGeneratedChildren(t *testing.T, kube client.Client, owner client.Object) error {
+	t.Helper()
+	var records api.MikroTikDNSRecordList
+	if err := kube.List(context.Background(), &records, client.InNamespace(owner.GetNamespace())); err != nil {
+		return err
+	}
+	for index := range records.Items {
+		if !metav1.IsControlledBy(&records.Items[index], owner) {
+			continue
+		}
+		if err := kube.Delete(context.Background(), &records.Items[index]); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	var forwards api.MikroTikPortForwardList
+	if err := kube.List(context.Background(), &forwards, client.InNamespace(owner.GetNamespace())); err != nil {
+		return err
+	}
+	for index := range forwards.Items {
+		if !metav1.IsControlledBy(&forwards.Items[index], owner) {
+			continue
+		}
+		if err := kube.Delete(context.Background(), &forwards.Items[index]); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	var routes api.MikroTikRouteList
+	if err := kube.List(context.Background(), &routes, client.InNamespace(owner.GetNamespace())); err != nil {
+		return err
+	}
+	for index := range routes.Items {
+		if !metav1.IsControlledBy(&routes.Items[index], owner) {
+			continue
+		}
+		if err := kube.Delete(context.Background(), &routes.Items[index]); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func assertNoOwnedGeneratedChildren(t *testing.T, kube client.Client, owner client.Object, dnsSourceKind, dnsSourceName, portForwardSource string) {

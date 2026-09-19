@@ -986,6 +986,12 @@ func (i *IngressReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err := i.Get(ctx, req.NamespacedName, &ingress); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
+	if !ingress.DeletionTimestamp.IsZero() {
+		if err := cleanupOwnedChildren(ctx, i.Client, i.RuntimeScheme, &ingress, "ingress", ingress.Name, "ingress/"+ingress.Name); err != nil {
+			return reconcile.Result{}, err
+		}
+		return reconcile.Result{}, nil
+	}
 	if ingress.Spec.IngressClassName == nil || *ingress.Spec.IngressClassName != api.IngressClassName {
 		if err := cleanupOwnedChildren(ctx, i.Client, i.RuntimeScheme, &ingress, "ingress", ingress.Name, "ingress/"+ingress.Name); err != nil {
 			return reconcile.Result{}, err
@@ -1288,6 +1294,12 @@ func (h *HTTPRouteReconciler) Reconcile(ctx context.Context, req reconcile.Reque
 	var route gatewayv1.HTTPRoute
 	if err := h.Get(ctx, req.NamespacedName, &route); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+	if !route.DeletionTimestamp.IsZero() {
+		if err := cleanupOwnedChildren(ctx, h.Client, h.Scheme, &route, "httproute", route.Name, "httproute/"+route.Name); err != nil {
+			return reconcile.Result{}, err
+		}
+		return reconcile.Result{}, nil
 	}
 	acceptedHostnames, attached, err := h.acceptedHostnamesForMikroTikGateway(ctx, route)
 	if err != nil {
