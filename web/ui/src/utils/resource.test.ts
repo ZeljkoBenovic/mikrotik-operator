@@ -112,6 +112,22 @@ describe('isReady', () => {
     expect(isReady(resource({ metadata: { name: 'dns' }, spec: {}, status: { applied: true } }))).toBe(true)
     expect(isReady(resource({ metadata: { name: 'dns' }, spec: {} }))).toBe(false)
   })
+
+  it('lets a Ready=False condition win over connected or applied', () => {
+    expect(
+      isReady(
+        resource({
+          metadata: { name: 'edge' },
+          spec: {},
+          status: {
+            connected: true,
+            applied: true,
+            conditions: [{ type: 'Ready', status: 'False', reason: 'ConnectionFailed' }],
+          },
+        }),
+      ),
+    ).toBe(false)
+  })
 })
 
 describe('specSummary', () => {
@@ -172,6 +188,15 @@ describe('omitEmpty and toSubmitBody', () => {
 
   it('drops empty objects and blank strings', () => {
     expect(omitEmpty({ a: '', b: {}, c: [], d: 1, e: { name: 'x' } })).toEqual({ d: 1, e: { name: 'x' } })
+  })
+
+  it('keeps false and zero so TLS and ports survive submit', () => {
+    expect(omitEmpty({ tls: false, port: 0, placeBefore: false, name: 'edge' })).toEqual({
+      tls: false,
+      port: 0,
+      placeBefore: false,
+      name: 'edge',
+    })
   })
 })
 

@@ -62,6 +62,7 @@ func TestEndpointKeyIgnoresMetadataAndNormalizesDefaultPort(t *testing.T) {
 	}{
 		{name: "DNS case and trailing dot", left: "Router.Example.COM.", right: "router.example.com"},
 		{name: "equivalent IPv6 text", left: "2001:0db8:0:0:0:0:0:1", right: "2001:db8::1"},
+		{name: "IPv4-mapped IPv6 is the same device as IPv4", left: "::ffff:192.0.2.1", right: "192.0.2.1"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -266,6 +267,116 @@ func TestDuplicateRouterEndpointOwnershipIsDeterministic(t *testing.T) {
 	}
 	if !claimed {
 		t.Fatal("destructive sweep did not detect the sibling endpoint claim")
+	}
+}
+
+func TestDurableRouterTargetsTrimsDedupsAndSorts(t *testing.T) {
+	record := &api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{
+		Name:        "web",
+		Namespace:   "app",
+		Annotations: map[string]string{durableRouterTargetsAnnotation: " router-b ,router-a,router-a, "},
+	}}
+	got := durableRouterTargets(record, " router-a ", "", "router-c")
+	want := []string{"router-a", "router-b", "router-c"}
+	if len(got) != len(want) {
+		t.Fatalf("durableRouterTargets() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("durableRouterTargets() = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestServiceWantsClusterRoute(t *testing.T) {
+	dns := map[string]string{api.DNSNameAnnotation: "web.home.arpa"}
+	tests := []struct {
+		name    string
+		service corev1.Service
+		want    bool
+	}{
+		{
+			name: "cluster IP with dns-name",
+			service: corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Annotations: dns},
+				Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8"},
+			},
+			want: true,
+		},
+		{
+			name: "empty type is the ClusterIP default",
+			service: corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Annotations: dns},
+				Spec:       corev1.ServiceSpec{ClusterIP: "10.0.0.8"},
+			},
+			want: true,
+		},
+		{
+			name: "load balancer keeps ClusterIP but must not get /32 routes",
+			service: corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Annotations: dns},
+				Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer, ClusterIP: "10.0.0.8"},
+			},
+		},
+		{
+			name: "node port",
+			service: corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Annotations: dns},
+				Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeNodePort, ClusterIP: "10.0.0.8"},
+			},
+		},
+		{
+			name: "headless cluster IP",
+			service: corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Annotations: dns},
+				Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: corev1.ClusterIPNone},
+			},
+		},
+		{
+			name: "missing dns-name",
+			service: corev1.Service{
+				Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8"},
+			},
+		},
+		{
+			name: "missing cluster IP",
+			service: corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Annotations: dns},
+				Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := serviceWantsClusterRoute(test.service); got != test.want {
+				t.Fatalf("serviceWantsClusterRoute() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestTranslatorOwnsGeneratedChildren(t *testing.T) {
+	controller := true
+	notController := false
+	tests := []struct {
+		name  string
+		owner metav1.OwnerReference
+		want  bool
+	}{
+		{name: "service controller", owner: metav1.OwnerReference{Kind: "Service", Controller: &controller}, want: true},
+		{name: "ingress controller", owner: metav1.OwnerReference{Kind: "Ingress", Controller: &controller}, want: true},
+		{name: "httproute controller", owner: metav1.OwnerReference{Kind: "HTTPRoute", Controller: &controller}, want: true},
+		{name: "non-controller ingress", owner: metav1.OwnerReference{Kind: "Ingress", Controller: &notController}},
+		{name: "nil controller service", owner: metav1.OwnerReference{Kind: "Service"}},
+		{name: "router owner", owner: metav1.OwnerReference{Kind: "MikroTikRouter", Controller: &controller}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			record := &api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{test.owner}}}
+			if got := translatorOwnsGeneratedChildren(record); got != test.want {
+				t.Fatalf("translatorOwnsGeneratedChildren() = %t, want %t", got, test.want)
+			}
+		})
 	}
 }
 
