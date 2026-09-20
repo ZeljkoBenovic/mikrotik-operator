@@ -18,6 +18,10 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover Ingress/HTTPRoute-owned DNS skipping cluster `/32` routes, LoadBalancer
+  and default ClusterIP service-type route gates, IPv4-mapped endpoint identity,
+  durable router-target normalization, and Admin UI submit preservation of
+  `tls: false` and port-forward `destinationAddress`.
 
 ## [0.4.0] - 2026-09-01
 
