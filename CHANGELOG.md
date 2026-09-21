@@ -14,6 +14,9 @@ and the project follows semantic versioning.
 
 ### Tests
 
+- Cover generated DNS/NAT claim yield after a loser records a collision, leftover
+  RouterOS cleanup that treats `name` and `namespace/name` as the same current
+  router, canonical claim keys, and nil `ServiceRef`/`PodRef` lookups.
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name

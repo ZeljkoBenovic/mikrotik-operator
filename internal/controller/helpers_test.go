@@ -513,3 +513,93 @@ func TestPortForwardDestinationAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestNamespacedNameFromAPI(t *testing.T) {
+	if got := namespacedNameFromAPI(nil); got != (types.NamespacedName{}) {
+		t.Fatalf("nil reference = %#v, want empty", got)
+	}
+	got := namespacedNameFromAPI(&api.NamespacedName{Namespace: "app", Name: "web"})
+	want := types.NamespacedName{Namespace: "app", Name: "web"}
+	if got != want {
+		t.Fatalf("namespacedNameFromAPI() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCleanupRouterTargetsSkipsCurrentRouterInAlternateForm(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	current := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "network", Finalizers: []string{resourceFinalizer}},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.10",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+		},
+		Status: api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{{
+			Address:           "192.0.2.10",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+		}}},
+	}
+	other := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "other", Finalizers: []string{resourceFinalizer}},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.0.2.20",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+		},
+		Status: api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{{
+			Address:           "192.0.2.20",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+		}}},
+	}
+	currentSecret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "network"}}
+	otherSecret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "other"}}
+	clients := map[string]*recordingRouterClient{
+		current.Spec.Address: {},
+		other.Spec.Address:   {},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&current, &other, &currentSecret, &otherSecret).
+		Build()
+	factory := func(_ context.Context, address string, _ int32, _ bool, _, _ string) (ros.Client, error) {
+		client, ok := clients[address]
+		if !ok {
+			t.Fatalf("unexpected router address %s", address)
+		}
+		return client, nil
+	}
+
+	tests := []struct {
+		name    string
+		targets []string
+		exclude string
+	}{
+		{name: "exclude name-only skips namespace/name of the same router", targets: []string{"network/edge", "other/edge"}, exclude: "edge"},
+		{name: "exclude namespace/name skips name-only of the same router", targets: []string{"edge", "other/edge"}, exclude: "network/edge"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, client := range clients {
+				client.deletedDNS = 0
+			}
+			err := cleanupRouterTargets(
+				context.Background(),
+				kube,
+				factory,
+				"network",
+				test.targets,
+				test.exclude,
+				func(ctx context.Context, client ros.Client) error {
+					return client.DeleteDNS(ctx, ros.ManagedComment("dns", "web", "app"))
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if clients[current.Spec.Address].deletedDNS != 0 {
+				t.Fatal("current router was cleaned using an alternate routerRef form")
+			}
+			if clients[other.Spec.Address].deletedDNS != 1 {
+				t.Fatalf("other-namespace leftover DNS deletes = %d, want 1", clients[other.Spec.Address].deletedDNS)
+			}
+		})
+	}
+}

@@ -472,3 +472,45 @@ func TestGetMikroTikRouterRejectsSlashInName(t *testing.T) {
 		t.Fatalf("error %v is not a not-found error", err)
 	}
 }
+
+func TestSplitRouterReference(t *testing.T) {
+	tests := []struct {
+		name          string
+		reference     string
+		wantNamespace string
+		wantName      string
+	}{
+		{name: "empty"},
+		{name: "whitespace", reference: "  "},
+		{name: "name only", reference: "edge", wantName: "edge"},
+		{name: "trims name only", reference: "  edge  ", wantName: "edge"},
+		{name: "namespace/name", reference: "network/edge", wantNamespace: "network", wantName: "edge"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotNamespace, gotName := splitRouterReference(test.reference)
+			if gotNamespace != test.wantNamespace || gotName != test.wantName {
+				t.Fatalf("splitRouterReference(%q) = %q, %q; want %q, %q", test.reference, gotNamespace, gotName, test.wantNamespace, test.wantName)
+			}
+		})
+	}
+}
+
+func TestCanonicalRouterClaimKey(t *testing.T) {
+	tests := []struct {
+		name string
+		key  types.NamespacedName
+		want string
+	}{
+		{name: "empty"},
+		{name: "name without namespace still prefixes a slash", key: types.NamespacedName{Name: "edge"}, want: "/edge"},
+		{name: "namespace and name", key: types.NamespacedName{Namespace: "network", Name: "edge"}, want: "network/edge"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := canonicalRouterClaimKey(test.key); got != test.want {
+				t.Fatalf("canonicalRouterClaimKey(%#v) = %q, want %q", test.key, got, test.want)
+			}
+		})
+	}
+}
