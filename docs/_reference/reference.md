@@ -69,9 +69,75 @@ address, port, protocol, state, interface, logging, or `placeBefore` fields.
 `placeBefore: true` inserts the rule before the first existing rule in that
 chain when the table is not empty.
 
+### Backup and restore API preview
+
+Chart `0.5.0` installs these CRDs. The current operator image (`appVersion`
+`v0.4.0`) does not watch or reconcile them. `controller.Setup` registers
+router, DNS, Service, Ingress, HTTPRoute, route, firewall, and port-forward
+reconcilers only. ClusterRole rules also omit `mikrotikbackups` and
+`mikrotikrestores`. Applying either kind stores the object in etcd and does
+not call RouterOS. The admin UI allowlist is the five reconciled kinds.
+
+Short names are `mtbackup` and `mtrestore`. Printer columns (Role, Bytes,
+Ready, Target) stay empty until a reconciler writes status.
+
+The published `v1alpha1` schema is:
+
+| Kind | Required spec | Intended behavior (not reconciled yet) |
+| --- | --- | --- |
+| `MikroTikBackup` | `routerRef` | Empty `schedule` is a one-shot `/export` into `status.export`. A cron `schedule` is a policy that would own snapshot children. `retention` defaults to 5 (max 100). |
+| `MikroTikRestore` | `backupRef.name` | Applies a stored export with `/import` only when `confirm` is exactly `RESTORE`. Set exactly one of `routerRef` or `connection.address` plus `connection.credentialsSecret`. Optional `backupRef.namespace`. |
+
+Schema-only examples. These objects validate, but they do not export or
+import until reconcilers land:
+
+```yaml
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikBackup
+metadata:
+  name: nightly
+spec:
+  routerRef: home-router
+  schedule: "0 2 * * *"
+  retention: 5
+```
+
+```yaml
+apiVersion: mikrotik.operator.io/v1alpha1
+kind: MikroTikRestore
+metadata:
+  name: restore-nightly
+spec:
+  backupRef:
+    name: nightly-snapshot
+  routerRef: home-router
+  confirm: RESTORE
+```
+
+Constraints already enforced by the CRD:
+
+- `spec.remote.enabled` must be false. Remote FTP/SMB/S3 storage is reserved
+  and CEL rejects enabling it.
+- Restore CEL requires exactly one target: `routerRef`, or inline
+  `connection.address` with `credentialsSecret.name`.
+- `status.export` is capped at 1,048,576 bytes. The type comments say an
+  export may contain RouterOS passwords and certificates.
+
+Neither kind uses a deletion finalizer. The type comments say there is no
+RouterOS object to finalize for a backup, and deleting a restore must not
+undo device changes.
+
+The RouterOS client already implements `Export` and `Import` in
+`internal/routeros/export.go` for a future reconciler. `/export` prefers
+compact output and adds `show-sensitive` on RouterOS v7+. `/import` writes
+`mikrotik-operator-restore.rsc` in chunks of at most 4095 bytes (the v6
+`/file/set contents=` limit) and uses a 60s timeout instead of the usual 15s
+operation timeout.
+
 ## Status and conditions
 
-Each CR has one `Ready` condition.
+Each reconciled CR has one `Ready` condition. Preview Backup and Restore
+objects never receive one.
 
 | Kind | Ready reason | Meaning |
 | --- | --- | --- |
@@ -113,6 +179,19 @@ managed-by=mikrotik-operator/<kind>/<namespace>/<name>
 The operator queries and mutates only entries with its expected managed
 comment. Resource finalizers preserve enough metadata to remove those entries
 when Kubernetes resources are deleted.
+
+Generated child custom resources use these names. Translators do not adopt an
+existing object they do not already own:
+
+| Parent | Child | Name |
+| --- | --- | --- |
+| Annotated Service | `MikroTikDNSRecord` | `<service>-dns` (truncated to 63 characters) |
+| Ingress hostname | `MikroTikDNSRecord` | `ing-<hash>` |
+| HTTPRoute hostname | `MikroTikDNSRecord` | `httproute-<hash>` |
+| ClusterIP Service | `MikroTikRoute` | `rt-<hash>` |
+| `public-ip` NAT | `MikroTikPortForward` | `pf-<hash>` |
+
+Finalizers:
 
 | Finalizer | Object |
 | --- | --- |

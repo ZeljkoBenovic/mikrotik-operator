@@ -71,6 +71,13 @@ Chart versions and operator image tags are independent. The chart's
 checkout, replace the OCI chart reference with `./charts/mikrotik-operator`.
 Pin the image tag or digest for production deployments.
 
+Chart `0.5.0` also installs `MikroTikBackup` and `MikroTikRestore` CRDs.
+`kubectl get crd` then lists seven MikroTik kinds. The operator watches
+routers, DNS records, routes, port forwards, and firewall rules only.
+Applying a Backup or Restore object stores it in etcd and does not call
+RouterOS. See
+[Reference]({% link _reference/reference.md %}#backup-and-restore-api-preview).
+
 ## Define a router
 
 ```yaml

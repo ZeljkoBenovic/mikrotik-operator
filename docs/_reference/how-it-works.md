@@ -59,9 +59,32 @@ manager replicas without leader election are not supported.
 - `RouteReconciler`, `FirewallRuleReconciler`, and `PortForwardReconciler`
   are the only controllers that talk to RouterOS for their kind.
 
+`MikroTikBackup` and `MikroTikRestore` are registered on the API scheme and
+ship as CRDs, but `Setup` does not start reconcilers for them. The RouterOS
+client already exposes `Export` and `Import`; no controller calls those
+methods yet.
+
 Service, Ingress, HTTPRoute, and annotation controllers must not call the
 RouterOS client. They create, update, or delete the corresponding custom
 resources; the CR reconciler applies the RouterOS change.
+
+When generated-child configuration is ambiguous (the same hostname or
+`public-ip:port/protocol` targeting different Services) or router selection
+fails, those translators delete the children they previously created rather
+than leaving stale DNS or NAT. They never adopt an existing CR that they do
+not already own. A name collision with a standalone `MikroTikRoute` fails
+with `already exists and is not owned by` and leaves the unowned object
+unchanged.
+
+Generated child names:
+
+| Parent | Child | Name |
+| --- | --- | --- |
+| Annotated Service | DNS | `<service>-dns` (truncated to 63 characters) |
+| Ingress | DNS | `ing-<hash>` of `ingress-name/host/service-name` |
+| HTTPRoute | DNS | `httproute-<hash>` of `namespace/name/hostname/service-namespace/service-name` |
+| ClusterIP route | Route | `rt-<hash>` of owner, service, destination, and gateway |
+| `public-ip` NAT | PortForward | `pf-<hash>` of owner, service, port, and protocol |
 
 ## Ownership and cleanup
 
@@ -81,4 +104,6 @@ CRDs, RouterOS client interface and implementation, controller setup/RBAC,
 Helm and raw manifests if needed, examples, documentation, and tests. Keep
 the desired-state operation idempotent and add a stable managed-comment
 namespace before implementing reconciliation. Copy CRD YAML to both
-`config/crd/bases` and `charts/mikrotik-operator/crds`.
+`config/crd/bases` and `charts/mikrotik-operator/crds`. A CRD that is not
+wired in `Setup`, RBAC, and tests stays inert after install; Backup and
+Restore are in that state today.

@@ -51,6 +51,11 @@ The core resources are namespaced:
 | `MikroTikPortForward` | `dst-nat`, `src-nat`, and forward firewall rules |
 | `MikroTikFirewallRule` | Custom `/ip firewall filter` entry |
 
+Chart `0.5.0` also installs `MikroTikBackup` and `MikroTikRestore` CRDs. Those
+kinds are an API preview: no reconciler, RBAC, or admin UI path watches them
+yet. Applying either object does not call RouterOS. See
+[`docs/_reference/reference.md`](docs/_reference/reference.md#backup-and-restore-api-preview).
+
 `routerRef` is optional when exactly one non-deleting `MikroTikRouter` exists
 in the resource namespace, or when that namespace has none and exactly one
 non-deleting router exists in the cluster. Set `routerRef` to `name` or
@@ -227,6 +232,7 @@ default. Override `E2E_ROUTER_IMAGE`, `E2E_CLUSTER_NAME`, or
 ## Development
 
 ```sh
+just --list
 just fmt-check
 just test
 just vet
@@ -236,6 +242,10 @@ just ui-test
 helm template validation charts/mikrotik-operator --include-crds
 cd web/ui && npm ci && npm run build
 ```
+
+Recipes are grouped (`dev`, `ui`, `packaging`, `cluster`, `e2e`). `just --list`
+prints the full set, including `just test-install`, `just test-install-ui`,
+`just e2e-test`, and `just e2e-ui-test`.
 
 `just e2e-ui-test` installs the chart with the UI enabled on k3d and CRUDs
 each CR over HTTP; it does not start RouterOS. Keep CRD YAML identical in
