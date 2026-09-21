@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
@@ -338,5 +339,110 @@ func TestCompactedTargetHistoryDoesNotRedialCleanedRouter(t *testing.T) {
 	}
 	if stored.Status.RouterRef != "" || stored.Status.Applied {
 		t.Fatalf("obsolete status was not cleared after durable compaction: %#v", stored.Status)
+	}
+}
+
+func TestGeneratedClaimHasYieldedTo(t *testing.T) {
+	winner := generatedClaimActor{key: "app/Ingress/a/winner"}
+	collision := errGeneratedChildCollision.Error() + " DNS hostname shared.example.com on Router app/router remains owned by incumbent owner " + winner.key
+	otherWinner := errGeneratedChildCollision.Error() + " remains owned by incumbent owner app/Ingress/b/other"
+
+	tests := []struct {
+		name   string
+		object client.Object
+		want   bool
+	}{
+		{
+			name: "applied DNS never yields",
+			object: &api.MikroTikDNSRecord{
+				Status: api.MikroTikDNSRecordStatus{
+					Applied:    true,
+					Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionFalse, Message: collision}},
+				},
+			},
+		},
+		{
+			name: "unapplied DNS with winner collision yields",
+			object: &api.MikroTikDNSRecord{
+				Status: api.MikroTikDNSRecordStatus{
+					Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionFalse, Message: collision}},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "unapplied DNS colliding with a different owner does not yield",
+			object: &api.MikroTikDNSRecord{
+				Status: api.MikroTikDNSRecordStatus{
+					Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionFalse, Message: otherWinner}},
+				},
+			},
+		},
+		{
+			name: "unapplied DNS with a generic apply failure does not yield",
+			object: &api.MikroTikDNSRecord{
+				Status: api.MikroTikDNSRecordStatus{
+					Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionFalse, Message: "dial timeout"}},
+				},
+			},
+		},
+		{
+			name: "unapplied port forward with winner collision yields",
+			object: &api.MikroTikPortForward{
+				Status: api.MikroTikPortForwardStatus{
+					Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionFalse, Message: collision}},
+				},
+			},
+			want: true,
+		},
+		{
+			name:   "non-claim objects never yield",
+			object: &corev1.Service{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := generatedClaimHasYieldedTo(test.object, winner); got != test.want {
+				t.Fatalf("generatedClaimHasYieldedTo() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestPreflightAllowsWinnerAfterLoserYields(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := networkingv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	winner := networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "app", UID: types.UID("winner")}}
+	loser := networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "app", UID: types.UID("loser")}}
+	winnerRecord := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{Name: "winner-record", Namespace: "app"},
+		Spec:       api.MikroTikDNSRecordSpec{RouterRef: "router", Name: "shared.example.com", Address: "10.0.0.10"},
+	}
+	loserRecord := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{Name: "loser-record", Namespace: "app"},
+		Spec:       api.MikroTikDNSRecordSpec{RouterRef: "router", Name: "shared.example.com", Address: "10.0.0.20"},
+		Status: api.MikroTikDNSRecordStatus{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready",
+				Status:  metav1.ConditionFalse,
+				Message: errGeneratedChildCollision.Error() + " remains owned by incumbent owner " + generatedClaimActorForCurrent(&winner).key,
+			}},
+		},
+	}
+	if err := controllerutil.SetControllerReference(&winner, &winnerRecord, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(&loser, &loserRecord, scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&winner, &loser, &winnerRecord, &loserRecord).Build()
+	candidate := []generatedDNSCandidate{{childName: "desired", hostname: "shared.example.com", address: "10.0.0.10"}}
+	if _, err := preflightGeneratedChildClaims(context.Background(), kube, &winner, "router", "", candidate, nil); err != nil {
+		t.Fatalf("winning owner stayed blocked after the loser yielded: %v", err)
 	}
 }
