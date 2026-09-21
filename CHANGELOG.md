@@ -12,6 +12,12 @@ and the project follows semantic versioning.
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
   Operator `appVersion` remains `v0.4.0`.
 
+### Fixed
+
+- Ingress and HTTPRoute reconcilers no longer delete owned DNS, route, and
+  port-forward children when a backend Service is missing. Recreating that
+  Service (Helm/GitOps replace) previously tore down live RouterOS NAT/DNS.
+
 ### Tests
 
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete

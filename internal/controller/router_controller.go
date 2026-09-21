@@ -1012,6 +1012,11 @@ func (i *IngressReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+	// A missing backend Service is often a recreate gap (Helm/GitOps, CI
+	// replace). Do not treat that as "no backends" and delete live DNS/NAT.
+	if err := errors.Join(backendErrors...); err != nil {
+		return reconcile.Result{}, err
+	}
 	services := make([]corev1.Service, 0)
 	servicePorts := make(map[types.NamespacedName][]corev1.ServicePort)
 	dnsCandidates := make([]generatedDNSCandidate, 0)
@@ -1305,6 +1310,11 @@ func (h *HTTPRouteReconciler) Reconcile(ctx context.Context, req reconcile.Reque
 	}
 	observedServices, backendErrors, err := h.observeBackendServices(ctx, route, allowedCrossNamespaceBackends)
 	if err != nil {
+		return reconcile.Result{}, err
+	}
+	// A missing backend Service is often a recreate gap (Helm/GitOps, CI
+	// replace). Do not treat that as "no backends" and delete live DNS/NAT.
+	if err := errors.Join(backendErrors...); err != nil {
 		return reconcile.Result{}, err
 	}
 	services := make([]corev1.Service, 0)
