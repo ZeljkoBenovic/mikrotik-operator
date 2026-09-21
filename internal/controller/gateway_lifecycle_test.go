@@ -318,6 +318,50 @@ func TestIngressInvalidBackendPortStillPrunesOwnedForwards(t *testing.T) {
 	assertNoOwnedGeneratedChildren(t, kube, &ingress, "ingress", ingress.Name, "ingress/"+ingress.Name)
 }
 
+func TestIngressMissingBackendServicePreservesOwnedChildren(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	className := api.IngressClassName
+	ingressClass := networkingv1.IngressClass{
+		ObjectMeta: metav1.ObjectMeta{Name: className},
+		Spec:       networkingv1.IngressClassSpec{Controller: api.IngressController},
+	}
+	ingress := networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ingress",
+			Namespace: "app",
+			UID:       "ingress-uid",
+			Annotations: map[string]string{
+				api.PublicIPAnnotation:  "198.51.100.10",
+				api.RouterRefAnnotation: "router",
+			},
+		},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: &className,
+			Rules:            []networkingv1.IngressRule{ingressRuleForService("app.example.com", "backend", 80)},
+		},
+	}
+	record := api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "dns", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/ingress": ingress.Name}}}
+	forward := api.MikroTikPortForward{ObjectMeta: metav1.ObjectMeta{Name: "forward", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/port-forward-source": shortHash("app/ingress/ingress")}}}
+	route := api.MikroTikRoute{ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "app", Labels: map[string]string{clusterRouteSourceLabel: clusterRouteSourceValue("app", "ingress/"+ingress.Name)}}}
+	if err := controllerutil.SetControllerReference(&ingress, &record, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(&ingress, &forward, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(&ingress, &route, scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&ingressClass, &ingress, &record, &forward, &route).Build()
+	reconciler := IngressReconciler{Client: kube, RuntimeScheme: scheme}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "ingress")); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected missing backend Service, got %v", err)
+	}
+	assertExists(t, kube, &api.MikroTikDNSRecord{}, "app", "dns")
+	assertExists(t, kube, &api.MikroTikPortForward{}, "app", "forward")
+	assertExists(t, kube, &api.MikroTikRoute{}, "app", "route")
+}
+
 func TestHTTPRouteInvalidBackendPortStillPrunesOwnedForwards(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	gatewayClass := gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName}, Spec: gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController}}
@@ -357,6 +401,52 @@ func TestHTTPRouteInvalidBackendPortStillPrunesOwnedForwards(t *testing.T) {
 		t.Fatal("expected invalid backend port error")
 	}
 	assertNoOwnedGeneratedChildren(t, kube, &route, "httproute", route.Name, "httproute/"+route.Name)
+}
+
+func TestHTTPRouteMissingBackendServicePreservesOwnedChildren(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	gatewayClass, gateway := mikroTikGatewayFixture()
+	port := gatewayv1.PortNumber(80)
+	route := gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "route",
+			Namespace: "app",
+			UID:       "route-uid",
+			Annotations: map[string]string{
+				api.PublicIPAnnotation:  "198.51.100.10",
+				api.RouterRefAnnotation: "router",
+			},
+		},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge"}}},
+			Hostnames:       []gatewayv1.Hostname{"app.example.com"},
+			Rules: []gatewayv1.HTTPRouteRule{{
+				BackendRefs: []gatewayv1.HTTPBackendRef{{
+					BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{Name: "backend", Port: &port}},
+				}},
+			}},
+		},
+	}
+	record := api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "dns", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/httproute": route.Name}}}
+	forward := api.MikroTikPortForward{ObjectMeta: metav1.ObjectMeta{Name: "forward", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/port-forward-source": shortHash("app/httproute/route")}}}
+	ownedRoute := api.MikroTikRoute{ObjectMeta: metav1.ObjectMeta{Name: "cluster-route", Namespace: "app", Labels: map[string]string{clusterRouteSourceLabel: clusterRouteSourceValue("app", "httproute/"+route.Name)}}}
+	if err := controllerutil.SetControllerReference(&route, &record, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(&route, &forward, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(&route, &ownedRoute, scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway, &route, &record, &forward, &ownedRoute).Build()
+	reconciler := HTTPRouteReconciler{Client: kube, Scheme: scheme}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "route")); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected missing backend Service, got %v", err)
+	}
+	assertExists(t, kube, &api.MikroTikDNSRecord{}, "app", "dns")
+	assertExists(t, kube, &api.MikroTikPortForward{}, "app", "forward")
+	assertExists(t, kube, &api.MikroTikRoute{}, "app", "cluster-route")
 }
 
 func TestHTTPRouteObservationErrorsPreserveOwnedChildren(t *testing.T) {
@@ -752,15 +842,15 @@ func ingressRuleForService(host, service string, port int32) networkingv1.Ingres
 
 func mikroTikGatewayFixture() (gatewayv1.GatewayClass, gatewayv1.Gateway) {
 	return gatewayv1.GatewayClass{
-		ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
-		Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
-	}, gatewayv1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
-		Spec: gatewayv1.GatewaySpec{
-			GatewayClassName: api.GatewayClassName,
-			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
-		},
-	}
+			ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
+			Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
+		}, gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: api.GatewayClassName,
+				Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+			},
+		}
 }
 
 func httpBackendRef(name string, namespace gatewayv1.Namespace, port gatewayv1.PortNumber) gatewayv1.HTTPBackendRef {
