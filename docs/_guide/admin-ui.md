@@ -8,14 +8,18 @@ redirect_from:
 
 # Admin UI
 
-The operator chart can deploy an optional admin panel for the five MikroTik
-custom resources: routers, DNS records, routes, port forwards, and firewall
-rules. The UI lists objects across namespaces, shows status conditions, and
-lets you create, edit, or delete standalone resources. New resources are
-always created in the operator namespace; the create form does not offer a
-namespace picker. The header namespace filter is searchable and still lists
-existing objects across namespaces, including generated resources owned by
-Services in other namespaces.
+The operator chart can deploy an optional admin panel for the five reconciled
+MikroTik custom resources: routers, DNS records, routes, port forwards, and
+firewall rules. Chart `0.5.0` also installs `MikroTikBackup` and
+`MikroTikRestore` CRDs; the UI does not list or mutate those kinds because
+the operator does not reconcile them yet.
+
+The UI lists objects across namespaces, shows status conditions, and lets you
+create, edit, or delete standalone resources. New resources are always
+created in the operator namespace; the create form does not offer a namespace
+picker. The header namespace filter is searchable and still lists existing
+objects across namespaces, including generated resources owned by Services
+in other namespaces.
 
 The panel is disabled by default.
 
@@ -117,4 +121,6 @@ not start RouterOS.
 The backend allowlists five kinds (`mikrotikrouters`, `mikrotikdnsrecords`,
 `mikrotikroutes`, `mikrotikportforwards`, `mikrotikfirewallrules`). Secret,
 Service, and Pod list endpoints return names only. Update and delete of owned
-objects return HTTP 409 with a `managedBy` body.
+objects return HTTP 409 with a `managedBy` body. A spec-only PUT keeps the
+existing finalizers, owner references, UID, and generation so an edit cannot
+drop `mikrotik.operator.io/managed-config` and skip RouterOS cleanup.
