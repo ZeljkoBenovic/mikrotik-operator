@@ -83,6 +83,19 @@ For port forwarding:
   comes from `MikroTikPortForward` `spec.destinationAddress`, falling back to
   the `public-ip` annotation. Omit both to match any destination.
 
+## Export and import
+
+`Client.Export` and `Client.Import` exist for a future Backup/Restore
+reconciler. No controller calls them today.
+
+- `/export` prefers compact output. On RouterOS v7+ it adds `show-sensitive`
+  (v6 has no such flag). The operation timeout is 60s, not the usual 15s.
+- `/import` writes `mikrotik-operator-restore.rsc` and sets `contents=` in
+  chunks of at most 4095 bytes so a 1MiB export restores on both v6 and v7
+  (v6 rejects larger `/file/set contents=` values; v7 allows ~60KiB).
+- Import is not a managed-comment mutation. Treat it as a whole-device apply
+  that can contain passwords and certificates.
+
 ## Routing and DNS behavior
 
 - ClusterIP routes are single-host routes (`<clusterIP>/32`), not the whole
