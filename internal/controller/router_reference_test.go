@@ -280,9 +280,11 @@ func TestListMikroTikRouterIgnoresIncompleteKey(t *testing.T) {
 	tests := []struct {
 		name string
 		key  types.NamespacedName
+		want bool
 	}{
 		{name: "empty namespace", key: types.NamespacedName{Name: "edge"}},
 		{name: "empty name", key: types.NamespacedName{Namespace: "network"}},
+		{name: "complete key", key: types.NamespacedName{Namespace: "network", Name: "edge"}, want: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -290,8 +292,11 @@ func TestListMikroTikRouterIgnoresIncompleteKey(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if ok {
-				t.Fatalf("unexpected router %#v", got)
+			if ok != test.want {
+				t.Fatalf("ok = %t, want %t (router %#v)", ok, test.want, got)
+			}
+			if test.want && got.Name != "edge" {
+				t.Fatalf("router = %#v, want edge", got)
 			}
 		})
 	}

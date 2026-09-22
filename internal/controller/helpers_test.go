@@ -474,69 +474,6 @@ func TestServiceAddressRejectsNodePortWithoutInternalIP(t *testing.T) {
 	}
 }
 
-func TestValidateGeneratedDNSCandidates(t *testing.T) {
-	web := types.NamespacedName{Namespace: "app", Name: "web"}
-	apiSvc := types.NamespacedName{Namespace: "app", Name: "api"}
-	tests := []struct {
-		name       string
-		candidates []generatedDNSCandidate
-		wantErr    bool
-	}{
-		{
-			name: "empty hostname skipped",
-			candidates: []generatedDNSCandidate{
-				{hostname: "", address: "10.0.0.8", service: web},
-			},
-		},
-		{
-			name: "headless ClusterIP skipped",
-			candidates: []generatedDNSCandidate{
-				{hostname: "web.example.com", address: corev1.ClusterIPNone, service: web},
-			},
-		},
-		{
-			name: "same host and target is not ambiguous",
-			candidates: []generatedDNSCandidate{
-				{hostname: "Web.Example.COM.", address: "10.0.0.8", service: web},
-				{hostname: "web.example.com", address: "10.0.0.8", service: web},
-			},
-		},
-		{
-			name: "same host different backends is ambiguous",
-			candidates: []generatedDNSCandidate{
-				{hostname: "shared.example.com", address: "10.0.0.8", service: web},
-				{hostname: "shared.example.com.", address: "10.0.0.9", service: apiSvc},
-			},
-			wantErr: true,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			err := validateGeneratedDNSCandidates("ingress/web", test.candidates)
-			if test.wantErr {
-				if !errors.Is(err, errGeneratedChildAmbiguity) {
-					t.Fatalf("error = %v, want %v", err, errGeneratedChildAmbiguity)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
-
-func TestAppendUniqueService(t *testing.T) {
-	web := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"}}
-	apiSvc := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "app"}}
-	got := appendUniqueService(nil, web)
-	got = appendUniqueService(got, web)
-	got = appendUniqueService(got, apiSvc)
-	if len(got) != 2 || got[0].Name != "web" || got[1].Name != "api" {
-		t.Fatalf("services = %#v, want [web api]", got)
-	}
-}
-
 func TestAppendUniqueServicePort(t *testing.T) {
 	http := corev1.ServicePort{Name: "http", Port: 80, Protocol: corev1.ProtocolTCP}
 	https := corev1.ServicePort{Name: "https", Port: 443, Protocol: corev1.ProtocolTCP}

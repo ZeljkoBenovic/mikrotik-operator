@@ -24,6 +24,7 @@ func TestServiceDNSReconcilerTruncatesGeneratedDNSName(t *testing.T) {
 		wantDNSName string
 	}{
 		{name: "short service keeps -dns suffix", serviceName: "web", wantDNSName: "web-dns"},
+		{name: "59-character service fills the name limit", serviceName: strings.Repeat("s", 59), wantDNSName: strings.Repeat("s", 59) + "-dns"},
 		{name: "max-length service name is reused", serviceName: strings.Repeat("s", 63), wantDNSName: strings.Repeat("s", 63)},
 	}
 	for _, test := range tests {

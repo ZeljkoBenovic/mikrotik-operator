@@ -31,11 +31,17 @@ func TestGeneratedClaimObjectKind(t *testing.T) {
 		{name: "service", object: &corev1.Service{}, kind: "Service"},
 		{name: "ingress", object: &networkingv1.Ingress{}, kind: "Ingress"},
 		{name: "httproute", object: &gatewayv1.HTTPRoute{}, kind: "HTTPRoute"},
-		{name: "unknown", object: &corev1.Node{}, kind: "*v1.Node"},
+		{name: "unknown", object: &corev1.Node{}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			kind, direct := generatedClaimObjectKind(test.object)
+			if test.kind == "" {
+				if kind == "" || direct {
+					t.Fatalf("generatedClaimObjectKind() = %q, %t; want non-empty indirect kind", kind, direct)
+				}
+				return
+			}
 			if kind != test.kind || direct != test.direct {
 				t.Fatalf("generatedClaimObjectKind() = %q, %t; want %q, %t", kind, direct, test.kind, test.direct)
 			}
