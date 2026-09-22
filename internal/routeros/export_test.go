@@ -11,6 +11,67 @@ import (
 	"github.com/go-routeros/routeros/v3/proto"
 )
 
+func TestResourceVersion(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		reply *routeros.Reply
+		want  string
+	}{
+		{name: "nil reply", reply: nil},
+		{
+			name:  "skips nil sentences then reads version",
+			reply: &routeros.Reply{Re: []*proto.Sentence{nil, {Map: map[string]string{"version": " 7.15.3 "}}}},
+			want:  "7.15.3",
+		},
+		{
+			name: "skips empty version sentences",
+			reply: &routeros.Reply{Re: []*proto.Sentence{
+				{Map: map[string]string{"version": "  "}},
+				{Map: map[string]string{"version": "6.49.18"}},
+			}},
+			want: "6.49.18",
+		},
+		{
+			name:  "no version sentences",
+			reply: &routeros.Reply{Re: []*proto.Sentence{{Map: map[string]string{"architecture-name": "arm"}}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := resourceVersion(tt.reply); got != tt.want {
+				t.Fatalf("resourceVersion() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRouterOSMajorVersion(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		version string
+		want    int
+	}{
+		{name: "empty", version: ""},
+		{name: "whitespace", version: "  "},
+		{name: "v6 release", version: "6.49.18", want: 6},
+		{name: "v7 with channel suffix", version: "7.15.3 (stable)", want: 7},
+		{name: "leading v is not numeric", version: "v7.1"},
+		{name: "release candidate prefix", version: "7rc1", want: 7},
+		{name: "two-digit major", version: "10.0beta", want: 10},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := routerOSMajorVersion(tt.version); got != tt.want {
+				t.Fatalf("routerOSMajorVersion(%q) = %d, want %d", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExportText(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

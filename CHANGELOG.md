@@ -18,6 +18,10 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover RouterOS version parsing for `/export` `show-sensitive`, NAT
+  `place-before` chain lookup, generated Service DNS child name truncation,
+  empty-cluster implicit router selection, and generated-DNS hostname
+  candidate ambiguity.
 
 ## [0.4.0] - 2026-09-01
 

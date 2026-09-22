@@ -249,6 +249,54 @@ func TestRouterRefStorageUsesNamespaceNameAcrossNamespaces(t *testing.T) {
 	}
 }
 
+func TestResolveRouterReferenceReportsNoClusterRouter(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).Build()
+	_, err := resolveRouterReference(context.Background(), kube, "app", "")
+	if !errors.Is(err, errImplicitRouterSelection) {
+		t.Fatalf("error = %v, want %v", err, errImplicitRouterSelection)
+	}
+	if !strings.Contains(err.Error(), "no MikroTikRouter exists") {
+		t.Fatalf("error = %q, want no-router guidance", err)
+	}
+}
+
+func TestListMikroTikRouterIgnoresIncompleteKey(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "network"},
+		Spec: api.MikroTikRouterSpec{
+			Address:           "192.168.88.1",
+			CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+		},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&router).Build()
+	tests := []struct {
+		name string
+		key  types.NamespacedName
+	}{
+		{name: "empty namespace", key: types.NamespacedName{Name: "edge"}},
+		{name: "empty name", key: types.NamespacedName{Namespace: "network"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok, err := listMikroTikRouter(context.Background(), kube, test.key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok {
+				t.Fatalf("unexpected router %#v", got)
+			}
+		})
+	}
+}
+
 func TestResolveRouterReferenceKeepsNamedRefWhenRouterIsMissing(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := api.AddToScheme(scheme); err != nil {

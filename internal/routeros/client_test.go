@@ -294,6 +294,29 @@ func TestAPIClient_CloseIsConcurrentAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestPlaceBeforeArg(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		chain    string
+		firstIDs map[string]string
+		want     string
+	}{
+		{name: "empty map", chain: "dstnat", firstIDs: map[string]string{}},
+		{name: "missing chain", chain: "srcnat", firstIDs: map[string]string{"dstnat": "*1"}},
+		{name: "empty id skipped", chain: "forward", firstIDs: map[string]string{"forward": ""}},
+		{name: "places before first id", chain: "dstnat", firstIDs: map[string]string{"dstnat": "*A", "srcnat": "*B"}, want: "=place-before=*A"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := placeBeforeArg(tt.chain, tt.firstIDs); got != tt.want {
+				t.Fatalf("placeBeforeArg() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestManagedComment(t *testing.T) {
 	got := ManagedComment("dns", "web", "apps")
 	want := "managed-by=mikrotik-operator/dns/apps/web"
