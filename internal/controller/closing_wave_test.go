@@ -13,9 +13,41 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
+
+func TestGeneratedClaimObjectKind(t *testing.T) {
+	tests := []struct {
+		name   string
+		object client.Object
+		kind   string
+		direct bool
+	}{
+		{name: "dns record", object: &api.MikroTikDNSRecord{}, kind: "MikroTikDNSRecord", direct: true},
+		{name: "port forward", object: &api.MikroTikPortForward{}, kind: "MikroTikPortForward", direct: true},
+		{name: "service", object: &corev1.Service{}, kind: "Service"},
+		{name: "ingress", object: &networkingv1.Ingress{}, kind: "Ingress"},
+		{name: "httproute", object: &gatewayv1.HTTPRoute{}, kind: "HTTPRoute"},
+		{name: "unknown", object: &corev1.Node{}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			kind, direct := generatedClaimObjectKind(test.object)
+			if test.kind == "" {
+				if kind == "" || direct {
+					t.Fatalf("generatedClaimObjectKind() = %q, %t; want non-empty indirect kind", kind, direct)
+				}
+				return
+			}
+			if kind != test.kind || direct != test.direct {
+				t.Fatalf("generatedClaimObjectKind() = %q, %t; want %q, %t", kind, direct, test.kind, test.direct)
+			}
+		})
+	}
+}
 
 func TestRouterActiveGateUsesPhysicalEndpointHistory(t *testing.T) {
 	scheme := runtime.NewScheme()

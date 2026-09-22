@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
@@ -15,6 +16,44 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
+
+func TestServiceDNSReconcilerTruncatesGeneratedDNSName(t *testing.T) {
+	tests := []struct {
+		name        string
+		serviceName string
+		wantDNSName string
+	}{
+		{name: "short service keeps -dns suffix", serviceName: "web", wantDNSName: "web-dns"},
+		{name: "59-character service fills the name limit", serviceName: strings.Repeat("s", 59), wantDNSName: strings.Repeat("s", 59) + "-dns"},
+		{name: "max-length service name is reused", serviceName: strings.Repeat("s", 63), wantDNSName: strings.Repeat("s", 63)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			scheme := controllerTestScheme(t)
+			service, router, node := annotatedClusterIPFixture()
+			service.Name = test.serviceName
+			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &router, &node).Build()
+			reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+			if err := reconcileServiceUntil(t, reconciler, service); err != nil {
+				t.Fatal(err)
+			}
+			var stored corev1.Service
+			if err := kube.Get(context.Background(), types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, &stored); err != nil {
+				t.Fatal(err)
+			}
+			var record api.MikroTikDNSRecord
+			if err := kube.Get(context.Background(), types.NamespacedName{Name: test.wantDNSName, Namespace: service.Namespace}, &record); err != nil {
+				t.Fatal(err)
+			}
+			if record.Spec.Name != "web.home.arpa" {
+				t.Fatalf("hostname %q, want web.home.arpa", record.Spec.Name)
+			}
+			if !metav1.IsControlledBy(&record, &stored) {
+				t.Fatal("generated DNS record is not owned by the Service")
+			}
+		})
+	}
+}
 
 func TestServiceDNSReconcilerCreatesOwnedRouteCRsWithoutRouterOS(t *testing.T) {
 	scheme := controllerTestScheme(t)
