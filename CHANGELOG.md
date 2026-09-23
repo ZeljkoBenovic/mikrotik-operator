@@ -18,6 +18,9 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover restore-file identity including the `.txt` lookup fallback, empty
+  `/export` `!done` fallback, generated claim-actor directness, and `shortHash`
+  child-name stability.
 
 ## [0.4.0] - 2026-09-01
 

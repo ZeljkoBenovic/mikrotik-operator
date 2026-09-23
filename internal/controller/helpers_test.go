@@ -485,6 +485,21 @@ func TestAppendUniqueServicePort(t *testing.T) {
 	}
 }
 
+func TestShortHashIsStableSixteenHex(t *testing.T) {
+	t.Parallel()
+	const want = "d61db77bc9deda87"
+	got := shortHash("app/ingress/web")
+	if got != want {
+		t.Fatalf("shortHash(app/ingress/web) = %q, want %q", got, want)
+	}
+	if again := shortHash("app/ingress/web"); again != want {
+		t.Fatalf("shortHash is not stable: %q", again)
+	}
+	if other := shortHash("app/ingress/other"); other == want {
+		t.Fatal("distinct sources produced the same child-name hash")
+	}
+}
+
 func TestPortForwardDestinationAddress(t *testing.T) {
 	tests := []struct {
 		name  string
