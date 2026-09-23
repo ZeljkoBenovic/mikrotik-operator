@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -292,6 +293,125 @@ func TestDirectResourcesTakeCanonicalClaimPriority(t *testing.T) {
 			t.Fatalf("canonical direct winner remained blocked after the loser yielded: %v", err)
 		}
 	})
+}
+
+func TestGeneratedClaimActorDirectness(t *testing.T) {
+	t.Parallel()
+	direct := &api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "www", Namespace: "app", UID: "dns-uid"}}
+	ingress := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "public", Namespace: "app", UID: "ing-uid"}}
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app", UID: "svc-uid"}}
+	child := &api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "child", Namespace: "app", UID: "child-uid"}}
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := networkingv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(ingress, child, scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	currentDirect := generatedClaimActorForCurrent(direct)
+	if !currentDirect.direct || currentDirect.key != "app/MikroTikDNSRecord/www/dns-uid" {
+		t.Fatalf("direct current actor = %#v", currentDirect)
+	}
+	currentIngress := generatedClaimActorForCurrent(ingress)
+	if currentIngress.direct || currentIngress.key != "app/Ingress/public/ing-uid" {
+		t.Fatalf("generated Ingress current actor = %#v", currentIngress)
+	}
+	currentService := generatedClaimActorForCurrent(service)
+	if currentService.direct || currentService.key != "app/Service/web/svc-uid" {
+		t.Fatalf("generated Service current actor = %#v", currentService)
+	}
+	currentChild := generatedClaimActorForCurrent(child)
+	if currentChild.direct || currentChild.key != "app/Ingress/public/ing-uid" {
+		t.Fatalf("owned child current actor = %#v", currentChild)
+	}
+
+	existingDirect := generatedClaimActorForExisting(direct)
+	if !existingDirect.direct || existingDirect.key != currentDirect.key {
+		t.Fatalf("standalone existing actor = %#v", existingDirect)
+	}
+	existingChild := generatedClaimActorForExisting(child)
+	if existingChild.direct || existingChild.key != "app/Ingress/public/ing-uid" {
+		t.Fatalf("owned existing actor = %#v", existingChild)
+	}
+}
+
+func TestGeneratedOwnershipConflict(t *testing.T) {
+	t.Parallel()
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := networkingv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	ingress := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "public", Namespace: "app", UID: "ing-uid"}}
+	generated := &api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "generated", Namespace: "app"}}
+	if err := controllerutil.SetControllerReference(ingress, generated, scheme); err != nil {
+		t.Fatal(err)
+	}
+	direct := &api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "direct", Namespace: "app", UID: "direct-uid"}}
+	winner := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "app", UID: "winner-uid"}}
+	loser := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "app", UID: "loser-uid"}}
+	winnerChild := &api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "winner-child", Namespace: "app"}}
+	loserChild := &api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "loser-child", Namespace: "app"}}
+	if err := controllerutil.SetControllerReference(winner, winnerChild, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(loser, loserChild, scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	err := generatedOwnershipConflict(direct, generated, "DNS hostname shared.example.com", false)
+	if !errors.Is(err, errGeneratedClaimWaiting) || !strings.Contains(err.Error(), "generated owner") {
+		t.Fatalf("direct vs generated = %v", err)
+	}
+	err = generatedOwnershipConflict(ingress, direct, "DNS hostname shared.example.com", false)
+	if !errors.Is(err, errGeneratedChildCollision) || !strings.Contains(err.Error(), "reserved by direct resource") {
+		t.Fatalf("generated vs direct = %v", err)
+	}
+	err = generatedOwnershipConflict(winner, loserChild, "DNS hostname shared.example.com", true)
+	if !errors.Is(err, errGeneratedClaimWaiting) || !strings.Contains(err.Error(), "lower-priority owner") {
+		t.Fatalf("canonical generated winner = %v", err)
+	}
+	err = generatedOwnershipConflict(loser, winnerChild, "DNS hostname shared.example.com", false)
+	if !errors.Is(err, errGeneratedChildCollision) || !strings.Contains(err.Error(), "incumbent owner") {
+		t.Fatalf("non-canonical generated loser = %v", err)
+	}
+}
+
+func TestIsCurrentClaimObject(t *testing.T) {
+	t.Parallel()
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := networkingv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	owner := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "public", Namespace: "app", UID: "ing-uid"}}
+	same := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "public", Namespace: "app"}}
+	other := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "app"}}
+	owned := &api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "child", Namespace: "app"}}
+	foreign := &api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "foreign", Namespace: "app"}}
+	if err := controllerutil.SetControllerReference(owner, owned, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(other, foreign, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if !isCurrentClaimObject(same, owner) {
+		t.Fatal("same Ingress identity must count as the current claim")
+	}
+	if !isCurrentClaimObject(owned, owner) {
+		t.Fatal("controller-owned child must count as the current claim")
+	}
+	if isCurrentClaimObject(foreign, owner) {
+		t.Fatal("child owned by another Ingress must not count as the current claim")
+	}
 }
 
 func TestCompactedTargetHistoryDoesNotRedialCleanedRouter(t *testing.T) {

@@ -39,6 +39,21 @@ func TestExportText(t *testing.T) {
 			}},
 			want: "/ip dns\n/ip route\n",
 		},
+		{
+			name: "empty done ret falls back to sentences",
+			reply: &routeros.Reply{
+				Done: &proto.Sentence{Map: map[string]string{"ret": "  "}},
+				Re:   []*proto.Sentence{{Map: map[string]string{"script": "/ip dns set servers=1.1.1.1"}}},
+			},
+			want: "/ip dns set servers=1.1.1.1\n",
+		},
+		{
+			name: "skips empty values and .id keys",
+			reply: &routeros.Reply{Re: []*proto.Sentence{
+				{Map: map[string]string{".id": "*1", "script": "", "body": "/ip route"}},
+			}},
+			want: "/ip route\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -218,6 +233,45 @@ func TestSplitRestoreScript_RejectsStatementOverLimit(t *testing.T) {
 	}
 }
 
+func TestSplitRestoreScript_RejectsNonPositiveChunkSizeAndEmptyScript(t *testing.T) {
+	t.Parallel()
+	_, err := splitRestoreScript("/ip dns\n", 0)
+	if err == nil || !strings.Contains(err.Error(), "positive") {
+		t.Fatalf("zero chunk size error = %v", err)
+	}
+	_, err = splitRestoreScript("/ip dns\n", -1)
+	if err == nil || !strings.Contains(err.Error(), "positive") {
+		t.Fatalf("negative chunk size error = %v", err)
+	}
+	_, err = splitRestoreScript("  \n\n", maxRestoreFileContentsBytes)
+	if err == nil || !strings.Contains(err.Error(), "empty script") {
+		t.Fatalf("whitespace-only script error = %v", err)
+	}
+}
+
+func TestFileIdentityAndRestoreFileNameMatch(t *testing.T) {
+	t.Parallel()
+	id, name := fileIdentity(nil)
+	if id != "" || name != "" {
+		t.Fatalf("nil reply identity = %q %q", id, name)
+	}
+	id, name = fileIdentity(&routeros.Reply{Re: []*proto.Sentence{
+		nil,
+		{Map: map[string]string{"name": "other.rsc", ".id": "*1"}},
+		{Map: map[string]string{"name": restoreFileName}},
+		{Map: map[string]string{"name": restoreFileName + ".txt", ".id": "*8"}},
+	}})
+	if id != "*8" || name != restoreFileName+".txt" {
+		t.Fatalf("fileIdentity() = %q %q, want *8 %s.txt", id, name, restoreFileName)
+	}
+	if !restoreFileNameMatch(restoreFileName) || !restoreFileNameMatch(restoreFileName+".txt") {
+		t.Fatal("operator restore file names must match")
+	}
+	if restoreFileNameMatch("flash/" + restoreFileName) {
+		t.Fatal("unrelated restore file name must not match")
+	}
+}
+
 func TestImport_RejectsEmptyScript(t *testing.T) {
 	api := newScriptedAPIClient(t, &scriptedRouterOSClient{})
 	err := api.Import(context.Background(), "  ")
@@ -369,6 +423,53 @@ func TestImport_WritesFileThenImports(t *testing.T) {
 	}
 	if sawScriptRun {
 		t.Fatalf("system script path was used, calls=%#v", scripted.calls)
+	}
+}
+
+func TestImport_LooksUpTxtRestoreFileName(t *testing.T) {
+	empty := &routeros.Reply{}
+	txt := &routeros.Reply{Re: []*proto.Sentence{{
+		Map: map[string]string{".id": "*7", "name": restoreFileName + ".txt"},
+	}}}
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty}, // remove restore.rsc
+			{reply: empty}, // remove restore.rsc.txt
+			{reply: empty}, // create print without identity
+			{reply: empty}, // lookup restore.rsc
+			{reply: txt},   // lookup restore.rsc.txt
+			{reply: empty}, // set
+			{reply: empty}, // import
+			{reply: txt},   // print for remove
+			{reply: empty}, // remove
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	if err := api.Import(context.Background(), "/ip dns\n"); err != nil {
+		t.Fatal(err)
+	}
+	var setID, importName string
+	for _, call := range scripted.calls {
+		if len(call) == 0 {
+			continue
+		}
+		switch call[0] {
+		case "/file/set":
+			for _, arg := range call {
+				if strings.HasPrefix(arg, "=.id=") {
+					setID = strings.TrimPrefix(arg, "=.id=")
+				}
+			}
+		case "/import":
+			for _, arg := range call {
+				if strings.HasPrefix(arg, "=file-name=") {
+					importName = strings.TrimPrefix(arg, "=file-name=")
+				}
+			}
+		}
+	}
+	if setID != "*7" || importName != restoreFileName+".txt" {
+		t.Fatalf("txt lookup used id %q file %q; calls=%#v", setID, importName, scripted.calls)
 	}
 }
 
