@@ -18,6 +18,10 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover leftover labeled cluster-route cleanup when a Service is already gone,
+  `ensureRouterActive` write gates for terminating or unfinalized routers,
+  restore-file remove skipping empty identities, and restore statement
+  splitting around unmatched braces.
 
 ## [0.4.0] - 2026-09-01
 

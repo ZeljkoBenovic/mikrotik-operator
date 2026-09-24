@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
@@ -18,6 +19,47 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+func TestEnsureRouterActiveRejectsTerminatingAndUnfinalizedRouters(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).Build()
+	now := metav1.Now()
+	tests := []struct {
+		name   string
+		router api.MikroTikRouter
+		want   string
+	}{
+		{
+			name: "terminating router",
+			router: api.MikroTikRouter{ObjectMeta: metav1.ObjectMeta{
+				Name:              "edge",
+				Namespace:         "app",
+				Finalizers:        []string{resourceFinalizer},
+				DeletionTimestamp: &now,
+			}},
+			want: "being deleted",
+		},
+		{
+			name: "missing cleanup finalizer",
+			router: api.MikroTikRouter{ObjectMeta: metav1.ObjectMeta{
+				Name:      "edge",
+				Namespace: "app",
+			}},
+			want: "not finalized",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ensureRouterActive(context.Background(), kube, tt.router)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
 
 func TestRouterEndpointsPrefersExplicitEndpoints(t *testing.T) {
 	router := api.MikroTikRouter{
