@@ -438,6 +438,109 @@ func TestHTTPRouteObservationErrorsPreserveOwnedChildren(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteMissingParentLookupPreservesOwnedChildren(t *testing.T) {
+	tests := []struct {
+		name           string
+		includeGateway bool
+		includeClass   bool
+	}{
+		{name: "missing Gateway", includeClass: true},
+		{name: "missing GatewayClass", includeGateway: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			scheme := controllerTestScheme(t)
+			gatewayClass, gateway := mikroTikGatewayFixture()
+			port := gatewayv1.PortNumber(80)
+			route := gatewayv1.HTTPRoute{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "route",
+					Namespace: "app",
+					UID:       "route-uid",
+					Annotations: map[string]string{
+						api.PublicIPAnnotation:  "198.51.100.10",
+						api.RouterRefAnnotation: "router",
+					},
+				},
+				Spec: gatewayv1.HTTPRouteSpec{
+					CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge"}}},
+					Hostnames:       []gatewayv1.Hostname{"app.example.com"},
+					Rules: []gatewayv1.HTTPRouteRule{{
+						BackendRefs: []gatewayv1.HTTPBackendRef{httpBackendRef("backend", "", port)},
+					}},
+				},
+			}
+			service := corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+				Spec:       corev1.ServiceSpec{ClusterIP: "10.0.0.10", Ports: []corev1.ServicePort{{Port: 80}}},
+			}
+			record := api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "dns", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/httproute": route.Name}}}
+			forward := api.MikroTikPortForward{ObjectMeta: metav1.ObjectMeta{Name: "forward", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/port-forward-source": shortHash("app/httproute/route")}}}
+			ownedRoute := api.MikroTikRoute{ObjectMeta: metav1.ObjectMeta{Name: "cluster-route", Namespace: "app"}}
+			if err := controllerutil.SetControllerReference(&route, &record, scheme); err != nil {
+				t.Fatal(err)
+			}
+			if err := controllerutil.SetControllerReference(&route, &forward, scheme); err != nil {
+				t.Fatal(err)
+			}
+			if err := controllerutil.SetControllerReference(&route, &ownedRoute, scheme); err != nil {
+				t.Fatal(err)
+			}
+			objects := []client.Object{&route, &service, &record, &forward, &ownedRoute}
+			if test.includeClass {
+				objects = append(objects, &gatewayClass)
+			}
+			if test.includeGateway {
+				objects = append(objects, &gateway)
+			}
+			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			reconciler := HTTPRouteReconciler{Client: kube, Scheme: scheme}
+			if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "route")); !apierrors.IsNotFound(err) {
+				t.Fatalf("expected missing parent lookup error, got %v", err)
+			}
+			assertExists(t, kube, &api.MikroTikDNSRecord{}, "app", "dns")
+			assertExists(t, kube, &api.MikroTikPortForward{}, "app", "forward")
+			assertExists(t, kube, &api.MikroTikRoute{}, "app", "cluster-route")
+		})
+	}
+}
+
+func TestHTTPRouteUnattachedExistingGatewayStillPrunesOwnedChildren(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	gatewayClass := gatewayv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "other"},
+		Spec:       gatewayv1.GatewayClassSpec{ControllerName: "other.example/controller"},
+	}
+	gateway := gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+		Spec: gatewayv1.GatewaySpec{
+			GatewayClassName: "other",
+			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+		},
+	}
+	route := gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "app", UID: "route-uid"},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge"}}},
+			Hostnames:       []gatewayv1.Hostname{"app.example.com"},
+		},
+	}
+	record := api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "dns", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/httproute": route.Name}}}
+	forward := api.MikroTikPortForward{ObjectMeta: metav1.ObjectMeta{Name: "forward", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/port-forward-source": shortHash("app/httproute/route")}}}
+	if err := controllerutil.SetControllerReference(&route, &record, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(&route, &forward, scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway, &route, &record, &forward).Build()
+	reconciler := HTTPRouteReconciler{Client: kube, Scheme: scheme}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "route")); err != nil {
+		t.Fatal(err)
+	}
+	assertNoOwnedGeneratedChildren(t, kube, &route, "httproute", route.Name, "httproute/"+route.Name)
+}
+
 func TestIngressTransientReadsPreserveOwnedChildren(t *testing.T) {
 	sentinel := errors.New("transient API read failure")
 	tests := []struct {
@@ -752,15 +855,15 @@ func ingressRuleForService(host, service string, port int32) networkingv1.Ingres
 
 func mikroTikGatewayFixture() (gatewayv1.GatewayClass, gatewayv1.Gateway) {
 	return gatewayv1.GatewayClass{
-		ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
-		Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
-	}, gatewayv1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
-		Spec: gatewayv1.GatewaySpec{
-			GatewayClassName: api.GatewayClassName,
-			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
-		},
-	}
+			ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
+			Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
+		}, gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: api.GatewayClassName,
+				Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+			},
+		}
 }
 
 func httpBackendRef(name string, namespace gatewayv1.Namespace, port gatewayv1.PortNumber) gatewayv1.HTTPBackendRef {

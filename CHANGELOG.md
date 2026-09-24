@@ -7,6 +7,12 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- HTTPRoute no longer treats a missing parent Gateway or GatewayClass as
+  detached and deletes owned DNS, route, and port-forward children. Recreating
+  that Gateway (Helm/GitOps replace) used to tear down live RouterOS NAT/DNS.
+
 ### Added
 
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.

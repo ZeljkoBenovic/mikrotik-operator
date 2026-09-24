@@ -1500,6 +1500,7 @@ func (h *HTTPRouteReconciler) acceptedHostnamesForMikroTikGateway(ctx context.Co
 	}
 	accepted := make(map[gatewayv1.Hostname]struct{})
 	attached := false
+	var parentLookupErrs []error
 	for _, parent := range route.Spec.ParentRefs {
 		if parent.Group != nil && string(*parent.Group) != gatewayv1.GroupVersion.Group {
 			continue
@@ -1516,6 +1517,9 @@ func (h *HTTPRouteReconciler) acceptedHostnamesForMikroTikGateway(ctx context.Co
 			if !apierrors.IsNotFound(err) {
 				return nil, false, err
 			}
+			// A missing Gateway is often a recreate gap. Do not treat that as
+			// "not attached" and delete live DNS/NAT.
+			parentLookupErrs = append(parentLookupErrs, err)
 			continue
 		}
 		if string(gateway.Spec.GatewayClassName) != gatewayClassName {
@@ -1526,6 +1530,7 @@ func (h *HTTPRouteReconciler) acceptedHostnamesForMikroTikGateway(ctx context.Co
 			if !apierrors.IsNotFound(err) {
 				return nil, false, err
 			}
+			parentLookupErrs = append(parentLookupErrs, err)
 			continue
 		}
 		if string(gatewayClass.Spec.ControllerName) != controllerName {
@@ -1547,6 +1552,11 @@ func (h *HTTPRouteReconciler) acceptedHostnamesForMikroTikGateway(ctx context.Co
 		hostnames = append(hostnames, hostname)
 	}
 	sort.Slice(hostnames, func(left, right int) bool { return hostnames[left] < hostnames[right] })
+	if !attached {
+		if err := errors.Join(parentLookupErrs...); err != nil {
+			return nil, false, err
+		}
+	}
 	return hostnames, attached, nil
 }
 
