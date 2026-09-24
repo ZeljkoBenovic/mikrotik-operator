@@ -168,6 +168,42 @@ func TestServiceDNSReconcilerDeletesRoutesWhenDNSAnnotationRemoved(t *testing.T)
 	}
 }
 
+func TestServiceDNSReconcilerDeletesOnlyMatchingLabeledRoutesWhenServiceIsGone(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	leftover := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rt-web",
+			Namespace: "app",
+			Labels: map[string]string{
+				clusterRouteSourceLabel: clusterRouteSourceValue("app", "service/web"),
+			},
+		},
+		Spec: api.MikroTikRouteSpec{Destination: "10.0.0.8/32", Gateway: "192.0.2.10"},
+	}
+	otherService := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rt-other",
+			Namespace: "app",
+			Labels: map[string]string{
+				clusterRouteSourceLabel: clusterRouteSourceValue("app", "service/other"),
+			},
+		},
+		Spec: api.MikroTikRouteSpec{Destination: "10.0.0.9/32", Gateway: "192.0.2.10"},
+	}
+	manual := api.MikroTikRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "manual", Namespace: "app"},
+		Spec:       api.MikroTikRouteSpec{Destination: "0.0.0.0/0", Gateway: "192.0.2.1"},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&leftover, &otherService, &manual).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "web")); err != nil {
+		t.Fatal(err)
+	}
+	assertNotFound(t, kube, &api.MikroTikRoute{}, "app", "rt-web")
+	assertExists(t, kube, &api.MikroTikRoute{}, "app", "rt-other")
+	assertExists(t, kube, &api.MikroTikRoute{}, "app", "manual")
+}
+
 func TestServiceDNSReconcilerDeletesRoutesOnServiceDeletion(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	service, router, node := annotatedClusterIPFixture()

@@ -194,6 +194,33 @@ func TestSplitRestoreScript_RepeatsPathWhenChunkStartsWithCommand(t *testing.T) 
 	}
 }
 
+func TestRestorePathLine_UsesFirstLineOnly(t *testing.T) {
+	t.Parallel()
+	if !restorePathLine("/ip firewall filter\nadd action=accept chain=input") {
+		t.Fatal("multiline path statement was not treated as a path")
+	}
+	if restorePathLine("add action=accept chain=input\n/ip firewall filter") {
+		t.Fatal("command-first statement was treated as a path")
+	}
+}
+
+func TestRestoreStatements_UnmatchedCloseBraceDoesNotSwallowFollowingBlock(t *testing.T) {
+	t.Parallel()
+	got, err := restoreStatements("}\n{\nadd action=drop chain=input\n}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("statements = %#v, want unmatched closer then one braced block", got)
+	}
+	if strings.TrimSpace(got[0]) != "}" {
+		t.Fatalf("first statement = %q, want }", got[0])
+	}
+	if !strings.Contains(got[1], "add action=drop") || !strings.HasPrefix(strings.TrimSpace(got[1]), "{") {
+		t.Fatalf("braced command was split: %#v", got[1])
+	}
+}
+
 func TestRestoreStatements_JoinsBackslashContinuation(t *testing.T) {
 	t.Parallel()
 	script := "/ip firewall filter\nadd action=accept chain=input \\\n    comment=\"allow admin\"\nadd action=drop chain=input\n"
@@ -405,6 +432,85 @@ func TestImport_LooksUpFileIDWhenCreateReplyHasNone(t *testing.T) {
 	}
 	if setID != "*4" {
 		t.Fatalf("file set used id %q, want *4; calls=%#v", setID, scripted.calls)
+	}
+}
+
+func TestRemoveFileByName_SkipsNilAndEmptyIdentities(t *testing.T) {
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: &routeros.Reply{Re: []*proto.Sentence{
+				nil,
+				{Map: map[string]string{"name": restoreFileName}},
+				{Map: map[string]string{".id": "*3", "name": restoreFileName}},
+			}}},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	if err := api.removeFileByName(context.Background(), restoreFileName); err != nil {
+		t.Fatal(err)
+	}
+	var removes []string
+	for _, call := range scripted.calls {
+		if len(call) > 0 && call[0] == "/file/remove" {
+			removes = append(removes, call...)
+		}
+	}
+	if len(removes) == 0 || !containsArg(removes, "=.id=*3") {
+		t.Fatalf("expected remove of *3, calls=%#v", scripted.calls)
+	}
+	for _, call := range scripted.calls {
+		if len(call) > 0 && call[0] == "/file/remove" && containsArg(call, "=.id=") {
+			t.Fatalf("removed an empty identity: %#v", scripted.calls)
+		}
+	}
+}
+
+func TestRemoveFileByName_NilReplyIsNoop(t *testing.T) {
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{{reply: nil}},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	if err := api.removeFileByName(context.Background(), restoreFileName); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range scripted.calls {
+		if len(call) > 0 && call[0] == "/file/remove" {
+			t.Fatalf("nil print reply still removed a file: %#v", scripted.calls)
+		}
+	}
+}
+
+func TestLookupRestoreFile_PrintErrorDoesNotContinue(t *testing.T) {
+	scripted := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{err: errors.New("print failed")},
+		},
+	}
+	api := newScriptedAPIClient(t, scripted)
+	_, _, err := api.lookupRestoreFile(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "print failed") {
+		t.Fatalf("error = %v", err)
+	}
+	if len(scripted.calls) != 1 {
+		t.Fatalf("looked up additional names after print failure: %#v", scripted.calls)
+	}
+}
+
+func TestResourceVersion_SkipsNilSentencesAndEmptyValues(t *testing.T) {
+	t.Parallel()
+	if got := resourceVersion(nil); got != "" {
+		t.Fatalf("nil reply = %q", got)
+	}
+	reply := &routeros.Reply{
+		Re: []*proto.Sentence{
+			nil,
+			{Map: map[string]string{"version": "   "}},
+		},
+		Done: &proto.Sentence{Map: map[string]string{"version": "7.15.3 (stable)"}},
+	}
+	if got := resourceVersion(reply); got != "7.15.3 (stable)" {
+		t.Fatalf("resourceVersion() = %q, want 7.15.3 (stable)", got)
 	}
 }
 
