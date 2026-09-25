@@ -18,6 +18,9 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover Service NodePort DNS children using node InternalIP, port-forward
+  targetAddress preference over ServiceRef/PodRef, Gateway parent section-name
+  attachment, and NAT place-before skipping empty print identities.
 
 ## [0.4.0] - 2026-09-01
 

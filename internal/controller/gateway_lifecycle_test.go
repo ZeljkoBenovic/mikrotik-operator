@@ -171,6 +171,8 @@ func TestAcceptedListenerHostnamesHonorsParentPortAndUnionsListeners(t *testing.
 	}{
 		{name: "all matching listeners union", parent: gatewayv1.ParentReference{Name: "edge"}, want: []gatewayv1.Hostname{foo, bar}, attached: true},
 		{name: "port selects listener", parent: gatewayv1.ParentReference{Name: "edge", Port: pointerTo(gatewayv1.PortNumber(443))}, want: []gatewayv1.Hostname{bar}, attached: true},
+		{name: "section name selects listener", parent: gatewayv1.ParentReference{Name: "edge", SectionName: pointerTo(gatewayv1.SectionName("https"))}, want: []gatewayv1.Hostname{bar}, attached: true},
+		{name: "unknown section name", parent: gatewayv1.ParentReference{Name: "edge", SectionName: pointerTo(gatewayv1.SectionName("missing"))}},
 		{name: "unknown port", parent: gatewayv1.ParentReference{Name: "edge", Port: pointerTo(gatewayv1.PortNumber(8443))}},
 		{name: "section and port must both match", parent: gatewayv1.ParentReference{Name: "edge", SectionName: pointerTo(gatewayv1.SectionName("http")), Port: pointerTo(gatewayv1.PortNumber(443))}},
 	}
@@ -186,6 +188,64 @@ func TestAcceptedListenerHostnamesHonorsParentPortAndUnionsListeners(t *testing.
 				t.Fatalf("got hostnames %v attached=%t, want %v attached=%t", got, attached, test.want, test.attached)
 			}
 		})
+	}
+}
+
+func TestAcceptedHostnamesSkipNonGatewayParents(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := gatewayv1.Install(scheme); err != nil {
+		t.Fatal(err)
+	}
+	hostname := gatewayv1.Hostname("app.example.com")
+	gatewayClass := gatewayv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
+		Spec:       gatewayv1.GatewayClassSpec{ControllerName: gatewayv1.GatewayController(api.GatewayController)},
+	}
+	gateway := gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+		Spec: gatewayv1.GatewaySpec{
+			GatewayClassName: gatewayv1.ObjectName(api.GatewayClassName),
+			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+		},
+	}
+	serviceKind := gatewayv1.Kind("Service")
+	otherGroup := gatewayv1.Group("example.com")
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway).Build()
+	reconciler := HTTPRouteReconciler{Client: kube}
+
+	serviceOnly := gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "app"},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{
+				Name: "edge", Kind: &serviceKind,
+			}}},
+			Hostnames: []gatewayv1.Hostname{hostname},
+		},
+	}
+	got, attached, err := reconciler.acceptedHostnamesForMikroTikGateway(context.Background(), serviceOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attached || len(got) != 0 {
+		t.Fatalf("Service parent attached hostnames %v attached=%t", got, attached)
+	}
+
+	mixed := gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "app"},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{
+				{Name: "edge", Group: &otherGroup},
+				{Name: "edge"},
+			}},
+			Hostnames: []gatewayv1.Hostname{hostname},
+		},
+	}
+	got, attached, err = reconciler.acceptedHostnamesForMikroTikGateway(context.Background(), mixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !attached || !slices.Equal(got, []gatewayv1.Hostname{hostname}) {
+		t.Fatalf("got hostnames %v attached=%t, want [%s] attached", got, attached, hostname)
 	}
 }
 
@@ -752,15 +812,15 @@ func ingressRuleForService(host, service string, port int32) networkingv1.Ingres
 
 func mikroTikGatewayFixture() (gatewayv1.GatewayClass, gatewayv1.Gateway) {
 	return gatewayv1.GatewayClass{
-		ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
-		Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
-	}, gatewayv1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
-		Spec: gatewayv1.GatewaySpec{
-			GatewayClassName: api.GatewayClassName,
-			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
-		},
-	}
+			ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
+			Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
+		}, gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: api.GatewayClassName,
+				Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+			},
+		}
 }
 
 func httpBackendRef(name string, namespace gatewayv1.Namespace, port gatewayv1.PortNumber) gatewayv1.HTTPBackendRef {

@@ -519,6 +519,68 @@ func TestEnsurePortForward_PlacesBeforeExistingChainID(t *testing.T) {
 	}
 }
 
+func TestEnsurePortForward_PlaceBeforeSkipsEmptyChainAndID(t *testing.T) {
+	comment := ManagedComment("portforward", "web", "apps")
+	empty := &routeros.Reply{}
+	existing := &routeros.Reply{Re: []*proto.Sentence{
+		{Map: map[string]string{".id": "", "chain": "dstnat"}},
+		{Map: map[string]string{".id": "*9", "chain": ""}},
+		{Map: map[string]string{".id": "*3", "chain": "dstnat"}},
+		{Map: map[string]string{".id": "*5", "chain": "srcnat"}},
+	}}
+	client := &scriptedRouterOSClient{
+		responses: []scriptedRouterOSResponse{
+			{reply: empty},
+			{reply: empty},
+			{reply: existing},
+			{reply: &routeros.Reply{}},
+			{reply: &routeros.Reply{}},
+		},
+	}
+	api := newScriptedAPIClient(t, client)
+
+	err := api.EnsurePortForward(context.Background(), PortForward{
+		Protocol:     "tcp",
+		ExternalPort: 80,
+		Target:       "10.0.0.10",
+		TargetPort:   80,
+		PublicIP:     "198.51.100.10",
+	}, comment)
+	if err != nil {
+		t.Fatalf("EnsurePortForward() error = %v", err)
+	}
+	wantPlaceBefore := map[string]string{
+		"dstnat": "=place-before=*3",
+		"srcnat": "=place-before=*5",
+	}
+	found := 0
+	for _, call := range client.calls {
+		if len(call) == 0 || call[0] != "/ip/firewall/nat/add" {
+			continue
+		}
+		chain := ""
+		got := ""
+		for _, arg := range call {
+			switch {
+			case strings.HasPrefix(arg, "=chain="):
+				chain = strings.TrimPrefix(arg, "=chain=")
+			case strings.HasPrefix(arg, "=place-before="):
+				got = arg
+			}
+		}
+		if got == "=place-before=" || got == "=place-before=*9" {
+			t.Fatalf("NAT %s used incomplete print identity %q: %v", chain, got, call)
+		}
+		if want := wantPlaceBefore[chain]; got != want {
+			t.Fatalf("NAT %s add place-before = %q, want %q: %v", chain, got, want, call)
+		}
+		found++
+	}
+	if found != 2 {
+		t.Fatalf("placed NAT adds = %d, want 2", found)
+	}
+}
+
 func TestEnsurePortForward_SetsDstAddressOnDstNat(t *testing.T) {
 	comment := ManagedComment("portforward", "web", "apps")
 	empty := &routeros.Reply{}
