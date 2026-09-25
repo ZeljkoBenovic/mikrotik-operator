@@ -7,6 +7,13 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Ingress reconciliation no longer deletes owned DNS, route, and port-forward
+  children when the `mikrotik` IngressClass is missing. Recreating that class
+  (Helm/GitOps replace) used to wipe live RouterOS NAT/DNS and then recreate
+  them. An IngressClass that exists with a different controller still prunes.
+
 ### Added
 
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
