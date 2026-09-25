@@ -72,6 +72,79 @@ func TestPortForwardReconcilerAppliesSpecDestinationAddress(t *testing.T) {
 	}
 }
 
+func TestPortForwardReconcilerPrefersTargetAddressOverServiceRefAndPodRef(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	endpoint := api.RouterEndpoint{
+		Name:              "primary",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.8"},
+	}
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"},
+		Status:     corev1.PodStatus{PodIP: "10.0.0.99"},
+	}
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			RouterRef:     router.Name,
+			Protocol:      "tcp",
+			ExternalPort:  80,
+			TargetPort:    8080,
+			TargetAddress: "10.0.0.20",
+			ServiceRef:    &api.NamespacedName{Namespace: service.Namespace, Name: service.Name},
+			PodRef:        &api.NamespacedName{Namespace: pod.Namespace, Name: pod.Name},
+		},
+	}
+	routerClient := &recordingRouterClient{}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &secret, &service, &pod, &forward).
+		WithStatusSubresource(&router, &forward).
+		Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+		return routerClient, nil
+	}}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if len(routerClient.ensuredPortForwards) == 0 {
+		t.Fatal("expected dst-nat apply")
+	}
+	got := routerClient.ensuredPortForwards[len(routerClient.ensuredPortForwards)-1]
+	if got.Target != "10.0.0.20" {
+		t.Fatalf("NAT target = %q, want spec targetAddress 10.0.0.20", got.Target)
+	}
+	if len(routerClient.ensuredFirewallRules) == 0 {
+		t.Fatal("expected companion firewall apply")
+	}
+	firewall := routerClient.ensuredFirewallRules[len(routerClient.ensuredFirewallRules)-1]
+	if firewall.DestinationAddress != "10.0.0.20" {
+		t.Fatalf("companion firewall dst-address = %q, want 10.0.0.20", firewall.DestinationAddress)
+	}
+	var stored api.MikroTikPortForward
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: forward.Namespace, Name: forward.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status.TargetAddress != "10.0.0.20" {
+		t.Fatalf("status.targetAddress = %q, want 10.0.0.20", stored.Status.TargetAddress)
+	}
+}
+
 func TestPortForwardReconcilerPrefersSpecOverPublicIPAnnotation(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	endpoint := api.RouterEndpoint{

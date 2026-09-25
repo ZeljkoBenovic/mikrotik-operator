@@ -237,6 +237,44 @@ func TestServiceDNSReconcilerDoesNotCreateRouteForNodePort(t *testing.T) {
 	}
 }
 
+func TestServiceDNSReconcilerCreatesNodePortDNSWithInternalIP(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	service, router, node := annotatedClusterIPFixture()
+	service.Spec.Type = corev1.ServiceTypeNodePort
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service, &router, &node).Build()
+	reconciler := ServiceDNSReconciler{Client: kube, RuntimeScheme: scheme, Factory: refuseRouterOSFactory(t)}
+	req := reconcileRequest(service.Namespace, service.Name)
+	var record api.MikroTikDNSRecord
+	found := false
+	for i := 0; i < 8; i++ {
+		if _, err := reconciler.Reconcile(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Get(context.Background(), types.NamespacedName{Name: service.Name + "-dns", Namespace: service.Namespace}, &record); err == nil {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("NodePort Service did not create an owned DNS child")
+	}
+	if !metav1.IsControlledBy(&record, &service) {
+		t.Fatal("NodePort DNS child is not owned by the Service")
+	}
+	if record.Spec.Name != "web.home.arpa" {
+		t.Fatalf("DNS name = %q, want web.home.arpa", record.Spec.Name)
+	}
+	if record.Spec.Address != "192.0.2.10" {
+		t.Fatalf("DNS address = %q, want node InternalIP 192.0.2.10, not ClusterIP", record.Spec.Address)
+	}
+	if record.Spec.Address == service.Spec.ClusterIP {
+		t.Fatal("NodePort DNS used ClusterIP instead of node InternalIP")
+	}
+	if got := ownedRoutes(t, kube, &service); len(got) != 0 {
+		t.Fatalf("NodePort Service created route CRs: %#v", got)
+	}
+}
+
 func TestServiceDNSReconcilerCleansGeneratedChildrenWhenPublicIPRouterIsAmbiguous(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	service := corev1.Service{
