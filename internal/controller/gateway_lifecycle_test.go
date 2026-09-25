@@ -247,7 +247,7 @@ func TestCleanupOwnedChildrenPreservesUnownedLabelCollisions(t *testing.T) {
 	assertExists(t, kube, &api.MikroTikPortForward{}, "app", "unowned-pf")
 }
 
-func TestIngressMissingClassCleansOwnedChildren(t *testing.T) {
+func TestIngressMissingClassPreservesOwnedChildren(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	className := api.IngressClassName
 	ingress := networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "ingress", Namespace: "app", UID: "ingress-uid"}, Spec: networkingv1.IngressSpec{IngressClassName: &className}}
@@ -263,6 +263,31 @@ func TestIngressMissingClassCleansOwnedChildren(t *testing.T) {
 	reconciler := IngressReconciler{Client: kube, RuntimeScheme: scheme}
 	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "ingress")); !apierrors.IsNotFound(err) {
 		t.Fatalf("expected missing IngressClass error, got %v", err)
+	}
+	assertExists(t, kube, &api.MikroTikDNSRecord{}, "app", "dns")
+	assertExists(t, kube, &api.MikroTikPortForward{}, "app", "forward")
+}
+
+func TestIngressClassWrongControllerStillPrunesOwnedChildren(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	className := api.IngressClassName
+	ingressClass := networkingv1.IngressClass{
+		ObjectMeta: metav1.ObjectMeta{Name: className},
+		Spec:       networkingv1.IngressClassSpec{Controller: "other.example.com/controller"},
+	}
+	ingress := networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "ingress", Namespace: "app", UID: "ingress-uid"}, Spec: networkingv1.IngressSpec{IngressClassName: &className}}
+	record := api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "dns", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/ingress": ingress.Name}}}
+	forward := api.MikroTikPortForward{ObjectMeta: metav1.ObjectMeta{Name: "forward", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/port-forward-source": shortHash("app/ingress/ingress")}}}
+	if err := controllerutil.SetControllerReference(&ingress, &record, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(&ingress, &forward, scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&ingressClass, &ingress, &record, &forward).Build()
+	reconciler := IngressReconciler{Client: kube, RuntimeScheme: scheme}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "ingress")); err != nil {
+		t.Fatalf("reconcile wrong IngressClass controller: %v", err)
 	}
 	assertNotFound(t, kube, &api.MikroTikDNSRecord{}, "app", "dns")
 	assertNotFound(t, kube, &api.MikroTikPortForward{}, "app", "forward")
@@ -752,15 +777,15 @@ func ingressRuleForService(host, service string, port int32) networkingv1.Ingres
 
 func mikroTikGatewayFixture() (gatewayv1.GatewayClass, gatewayv1.Gateway) {
 	return gatewayv1.GatewayClass{
-		ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
-		Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
-	}, gatewayv1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
-		Spec: gatewayv1.GatewaySpec{
-			GatewayClassName: api.GatewayClassName,
-			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
-		},
-	}
+			ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
+			Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
+		}, gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: api.GatewayClassName,
+				Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+			},
+		}
 }
 
 func httpBackendRef(name string, namespace gatewayv1.Namespace, port gatewayv1.PortNumber) gatewayv1.HTTPBackendRef {

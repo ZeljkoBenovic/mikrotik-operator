@@ -994,12 +994,9 @@ func (i *IngressReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	}
 	var ingressClass networkingv1.IngressClass
 	if err := i.Get(ctx, types.NamespacedName{Name: api.IngressClassName}, &ingressClass); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return reconcile.Result{}, err
-		}
-		if cleanupErr := cleanupOwnedChildren(ctx, i.Client, i.RuntimeScheme, &ingress, "ingress", ingress.Name, "ingress/"+ingress.Name); cleanupErr != nil {
-			return reconcile.Result{}, errors.Join(err, cleanupErr)
-		}
+		// NotFound is a missing cluster object, not an unattached Ingress.
+		// Cleaning up here would wipe live RouterOS DNS/NAT/routes while
+		// Helm/GitOps replaces the IngressClass.
 		return reconcile.Result{}, err
 	}
 	if ingressClass.Spec.Controller != api.IngressController {
