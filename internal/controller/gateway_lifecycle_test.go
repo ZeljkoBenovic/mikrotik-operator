@@ -318,6 +318,50 @@ func TestIngressInvalidBackendPortStillPrunesOwnedForwards(t *testing.T) {
 	assertNoOwnedGeneratedChildren(t, kube, &ingress, "ingress", ingress.Name, "ingress/"+ingress.Name)
 }
 
+func TestHTTPRouteMissingBackendPortSkipsChildCreation(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	gatewayClass := gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName}, Spec: gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController}}
+	gateway := gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+		Spec:       gatewayv1.GatewaySpec{GatewayClassName: api.GatewayClassName, Listeners: []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}}},
+	}
+	route := gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "route",
+			Namespace: "app",
+			UID:       "route-uid",
+			Annotations: map[string]string{
+				api.PublicIPAnnotation:  "198.51.100.10",
+				api.RouterRefAnnotation: "router",
+			},
+		},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge"}}},
+			Hostnames:       []gatewayv1.Hostname{"noport.example.com"},
+			Rules: []gatewayv1.HTTPRouteRule{{
+				BackendRefs: []gatewayv1.HTTPBackendRef{{
+					BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{Name: "backend"}},
+				}},
+			}},
+		},
+	}
+	service := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "app"}, Spec: corev1.ServiceSpec{ClusterIP: "10.0.0.10", Ports: []corev1.ServicePort{{Port: 80}}}}
+	record := api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "stale-dns", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/httproute": route.Name}}}
+	forward := api.MikroTikPortForward{ObjectMeta: metav1.ObjectMeta{Name: "stale", Namespace: "app", Labels: map[string]string{"mikrotik.operator.io/port-forward-source": shortHash("app/httproute/route")}}}
+	if err := controllerutil.SetControllerReference(&route, &record, scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := controllerutil.SetControllerReference(&route, &forward, scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gatewayClass, &gateway, &route, &service, &record, &forward).Build()
+	reconciler := HTTPRouteReconciler{Client: kube, Scheme: scheme}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "route")); err == nil {
+		t.Fatal("expected missing backend port error")
+	}
+	assertNoOwnedGeneratedChildren(t, kube, &route, "httproute", route.Name, "httproute/"+route.Name)
+}
+
 func TestHTTPRouteInvalidBackendPortStillPrunesOwnedForwards(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	gatewayClass := gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName}, Spec: gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController}}
@@ -752,15 +796,15 @@ func ingressRuleForService(host, service string, port int32) networkingv1.Ingres
 
 func mikroTikGatewayFixture() (gatewayv1.GatewayClass, gatewayv1.Gateway) {
 	return gatewayv1.GatewayClass{
-		ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
-		Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
-	}, gatewayv1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
-		Spec: gatewayv1.GatewaySpec{
-			GatewayClassName: api.GatewayClassName,
-			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
-		},
-	}
+			ObjectMeta: metav1.ObjectMeta{Name: api.GatewayClassName},
+			Spec:       gatewayv1.GatewayClassSpec{ControllerName: api.GatewayController},
+		}, gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: api.GatewayClassName,
+				Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+			},
+		}
 }
 
 func httpBackendRef(name string, namespace gatewayv1.Namespace, port gatewayv1.PortNumber) gatewayv1.HTTPBackendRef {

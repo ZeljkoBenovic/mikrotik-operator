@@ -18,6 +18,9 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover removed-endpoint cleanup skipping a live sibling claim, DNS `serviceRef`
+  winning over a stale `spec.address`, and HTTPRoute backends without a port
+  skipping generated children.
 
 ## [0.4.0] - 2026-09-01
 
