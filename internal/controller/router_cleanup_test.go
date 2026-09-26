@@ -116,6 +116,67 @@ func TestRouterReconcilerSkipsDeletionSweepWhenEndpointIsClaimed(t *testing.T) {
 	}
 }
 
+func TestRouterReconcilerSkipsRemovedEndpointSweepWhenEndpointIsClaimed(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	current := api.RouterEndpoint{
+		Name:              "keep",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	removed := api.RouterEndpoint{
+		Name:              "moved",
+		Address:           "192.0.2.11",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	router := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "old", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{current}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{current, removed}},
+	}
+	claimant := api.MikroTikRouter{
+		ObjectMeta: metav1.ObjectMeta{Name: "new", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+		Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{removed}},
+		Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{removed}},
+	}
+	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
+	clients := map[string]*recordingRouterClient{
+		current.Address: {},
+		removed.Address: {},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&router, &claimant, &secret).
+		WithStatusSubresource(&router, &claimant).
+		Build()
+	reconciler := RouterReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Factory: func(_ context.Context, address string, _ int32, _ bool, _, _ string) (ros.Client, error) {
+			client, ok := clients[address]
+			if !ok {
+				t.Fatalf("unexpected router address %s", address)
+			}
+			return client, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(router.Namespace, router.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if clients[removed.Address].deletedManaged != 0 {
+		t.Fatalf("claimed removed endpoint was swept %d times", clients[removed.Address].deletedManaged)
+	}
+	if clients[current.Address].deletedManaged != 0 {
+		t.Fatal("current endpoint was swept while remaining in spec")
+	}
+	var stored api.MikroTikRouter
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: router.Namespace, Name: router.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Status.AppliedEndpoints) != 1 || stored.Status.AppliedEndpoints[0].Address != current.Address {
+		t.Fatalf("applied endpoints = %#v, want only %s", stored.Status.AppliedEndpoints, current.Address)
+	}
+}
+
 func TestRouterReconcilerSweepsRemovedEndpoints(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	current := api.RouterEndpoint{
