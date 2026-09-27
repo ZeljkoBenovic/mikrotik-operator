@@ -45,6 +45,23 @@ Object.defineProperty(window, 'ResizeObserver', {
   value: ResizeObserverStub,
 })
 
-vi.mock('@monaco-editor/react', () => ({
-  default: () => null,
-}))
+vi.mock('@monaco-editor/react', async () => {
+  const { createElement } = await import('react')
+  return {
+    default: ({
+      value,
+      onChange,
+      readOnly,
+    }: {
+      value?: string
+      onChange?: (value: string) => void
+      readOnly?: boolean
+    }) =>
+      createElement('textarea', {
+        'aria-label': 'YAML',
+        value,
+        readOnly,
+        onChange: (event: { target: { value: string } }) => onChange?.(event.target.value),
+      }),
+  }
+})

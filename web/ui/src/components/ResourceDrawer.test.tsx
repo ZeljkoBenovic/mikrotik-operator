@@ -592,4 +592,79 @@ describe('ResourceDrawer', () => {
     expect(await screen.findByText('namespaces unavailable')).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: /^service namespace$/i })).toBeEnabled()
   })
+
+  it('creates from YAML in the operator namespace even when the document names another one', async () => {
+    const fetchMock = stubFetch([
+      standaloneRouter({
+        metadata: { name: 'edge', namespace: 'network' },
+      }),
+    ])
+    const user = userEvent.setup()
+    renderWithProviders(<ResourceDrawer kind={dnsKind} open mode="create" onClose={() => {}} />)
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/^name$/i)).toBeEnabled()
+    })
+    await user.click(yamlSwitch())
+    const editor = await screen.findByLabelText('YAML')
+    fireEvent.change(editor, {
+      target: {
+        value: [
+          'apiVersion: mikrotik.operator.io/v1alpha1',
+          'kind: MikroTikDNSRecord',
+          'metadata:',
+          '  name: ui-dns',
+          '  namespace: wrong-namespace',
+          'spec:',
+          '  name: ui.home.arpa',
+          '  address: 10.0.0.8',
+          '  routerRef: network/edge',
+        ].join('\n'),
+      },
+    })
+    await user.click(screen.getByRole('button', { name: /create/i }))
+
+    await waitFor(() => {
+      const createCall = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url) === '/api/resources/mikrotikdnsrecords/mikrotik-operator-system' &&
+          init?.method === 'POST',
+      )
+      expect(createCall).toBeTruthy()
+      const body = JSON.parse(String(createCall?.[1]?.body))
+      expect(body.metadata.name).toBe('ui-dns')
+      expect(body.metadata.namespace).toBe('mikrotik-operator-system')
+      expect(body.spec.name).toBe('ui.home.arpa')
+    })
+  })
+
+  it('rejects an invalid YAML name without calling create', async () => {
+    const fetchMock = stubFetch()
+    const user = userEvent.setup()
+    renderWithProviders(<ResourceDrawer kind={routerKind} open mode="create" onClose={() => {}} />)
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/^name$/i)).toBeEnabled()
+    })
+    await user.click(yamlSwitch())
+    fireEvent.change(await screen.findByLabelText('YAML'), {
+      target: {
+        value: [
+          'apiVersion: mikrotik.operator.io/v1alpha1',
+          'kind: MikroTikRouter',
+          'metadata:',
+          '  name: Invalid_Name',
+          'spec:',
+          '  address: 192.0.2.10',
+        ].join('\n'),
+      },
+    })
+    await user.click(screen.getByRole('button', { name: /create/i }))
+    expect(
+      await screen.findByText(/start and end with a letter or number/),
+    ).toBeInTheDocument()
+    expect(
+      fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'POST'),
+    ).toBe(false)
+  })
 })

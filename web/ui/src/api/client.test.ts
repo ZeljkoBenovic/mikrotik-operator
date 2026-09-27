@@ -27,6 +27,29 @@ describe('normalizeOverview', () => {
     expect(normalizeOverview(null)).toEqual({})
     expect(normalizeOverview({ kinds: [{ notReady: 1 }] })).toEqual({})
   })
+
+  it('prefers total over count and keeps an explicit ready value', () => {
+    expect(
+      normalizeOverview({
+        kinds: [{ kind: 'mikrotikrouters', total: 5, count: 99, ready: 1, notReady: 1 }],
+      }),
+    ).toEqual({
+      mikrotikrouters: { total: 5, ready: 1, notReady: 1 },
+    })
+  })
+
+  it('reads a kinds map and then a top-level kind map', () => {
+    expect(
+      normalizeOverview({
+        kinds: { mikrotikroutes: { count: 3, notReady: 1 } },
+      }),
+    ).toEqual({
+      mikrotikroutes: { total: 3, ready: 2, notReady: 1 },
+    })
+    expect(normalizeOverview({ mikrotikfirewallrules: { total: 1, notReady: 0 } })).toEqual({
+      mikrotikfirewallrules: { total: 1, ready: 1, notReady: 0 },
+    })
+  })
 })
 
 describe('api client', () => {
@@ -66,6 +89,15 @@ describe('api client', () => {
       }),
     )
     await expect(api.config()).resolves.toBe('mikrotik-operator-system')
+  })
+
+  it('falls back to default when config omits or blanks the namespace', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(api.config()).resolves.toBe('default')
+
+    fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({ namespace: '   ' }), { status: 200 }))
+    await expect(api.config()).resolves.toBe('default')
   })
 
   it('creates, updates, and deletes resources', async () => {
