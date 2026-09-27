@@ -19,5 +19,8 @@ describe('yaml helpers', () => {
     expect(() => fromYAML('- just a list')).toThrow(/Kubernetes resource object/)
     expect(() => fromYAML('kind: MikroTikRouter')).toThrow(/metadata/)
     expect(() => fromYAML('metadata:\n  name: x\n')).toThrow(/spec/)
+    expect(() => fromYAML('metadata: null\nspec: {}\n')).toThrow(/metadata/)
+    expect(() => fromYAML('metadata:\n  name: x\nspec: null\n')).toThrow(/spec/)
+    expect(() => fromYAML('metadata: just-a-string\nspec: {}\n')).toThrow(/metadata/)
   })
 })

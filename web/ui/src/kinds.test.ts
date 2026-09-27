@@ -25,4 +25,13 @@ describe('kind registry', () => {
     expect(kindFromPath('/nope')).toBeUndefined()
     expect(kindFromPath('/')).toBeUndefined()
   })
+
+  it('does not treat singular or prefix-overlapping paths as a kind', () => {
+    expect(kindFromPath('/router')).toBeUndefined()
+    expect(kindFromPath('/port-forward')).toBeUndefined()
+    expect(kindFromPath('/routes')?.apiKind).toBe('MikroTikRoute')
+    expect(kindFromPath('/routers')?.apiKind).toBe('MikroTikRouter')
+    expect(kindFromPath('/routes/app/default')?.apiKind).toBe('MikroTikRoute')
+    expect(kindFromPath('/routers/app/edge')?.apiKind).toBe('MikroTikRouter')
+  })
 })

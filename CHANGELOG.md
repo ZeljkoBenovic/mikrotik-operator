@@ -14,6 +14,9 @@ and the project follows semantic versioning.
 
 ### Tests
 
+- Cover generated DNS hostname collisions, Ingress named-vs-numbered backend
+  ports, `route-mode` gateway selection, multi-endpoint connect rollback, Admin
+  UI YAML create namespace stamping, and overview/config parser fallbacks.
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
