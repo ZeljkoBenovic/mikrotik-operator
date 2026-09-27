@@ -121,7 +121,7 @@ HTTPRoutes are ignored unless Helm `gatewayAPI.enabled` is true, the parent
 Gateway uses the configured GatewayClass, and a listener accepts the route
 (HTTP or HTTPS protocol, hostname intersection, and `allowedRoutes`
 namespace policy). Cross-namespace Service backends also need a Gateway API
-`ReferenceGrant`.
+`ReferenceGrant`. A missing grant does not delete already-owned children.
 
 **Solution:**
 

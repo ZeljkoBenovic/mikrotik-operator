@@ -1303,6 +1303,12 @@ func (h *HTTPRouteReconciler) Reconcile(ctx context.Context, req reconcile.Reque
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+	// A missing or non-matching ReferenceGrant is often a recreate gap
+	// (Helm/GitOps replace). Do not treat that as "no backends" and delete
+	// live DNS/NAT. Permanent detach is removing the backendRef.
+	if err := unauthorizedCrossNamespaceBackends(route, allowedCrossNamespaceBackends); err != nil {
+		return reconcile.Result{}, err
+	}
 	observedServices, backendErrors, err := h.observeBackendServices(ctx, route, allowedCrossNamespaceBackends)
 	if err != nil {
 		return reconcile.Result{}, err
@@ -1659,6 +1665,36 @@ func referenceGrantPermitsService(ctx context.Context, kube client.Client, route
 		}
 	}
 	return false, nil
+}
+
+func unauthorizedCrossNamespaceBackends(route gatewayv1.HTTPRoute, allowed map[types.NamespacedName]bool) error {
+	var errs []error
+	for _, rule := range route.Spec.Rules {
+		for _, backend := range rule.BackendRefs {
+			if !isServiceBackend(backend) {
+				continue
+			}
+			namespace := route.Namespace
+			if backend.Namespace != nil {
+				namespace = string(*backend.Namespace)
+			}
+			if namespace == route.Namespace {
+				continue
+			}
+			key := types.NamespacedName{Namespace: namespace, Name: string(backend.Name)}
+			if allowed[key] {
+				continue
+			}
+			errs = append(errs, fmt.Errorf(
+				"HTTPRoute %s/%s backend Service %s/%s is not permitted by a ReferenceGrant",
+				route.Namespace,
+				route.Name,
+				namespace,
+				backend.Name,
+			))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (h *HTTPRouteReconciler) allowedCrossNamespaceBackends(ctx context.Context, route gatewayv1.HTTPRoute) (map[types.NamespacedName]bool, error) {
