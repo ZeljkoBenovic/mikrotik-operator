@@ -7,6 +7,12 @@ and the project follows semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- HTTPRoute no longer deletes owned DNS, route, and port-forward children when
+  a cross-namespace backend lacks a matching `ReferenceGrant`. Recreating that
+  grant (Helm/GitOps replace) previously tore down live RouterOS NAT/DNS.
+
 ### Added
 
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.

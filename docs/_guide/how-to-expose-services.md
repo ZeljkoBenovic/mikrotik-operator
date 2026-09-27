@@ -108,7 +108,9 @@ creates DNS and routes only after all of the following are true:
 - `allowedRoutes` permits this HTTPRoute (same namespace by default, or
   `All` / label selector).
 - Cross-namespace Service backends have a Gateway API `ReferenceGrant`
-  in the Service namespace allowing this HTTPRoute.
+  in the Service namespace allowing this HTTPRoute. A missing grant
+  fails reconcile and leaves already-owned DNS/NAT/route children in
+  place; remove the backendRef to detach.
 
 See [`examples/gateway-api.yaml`](https://github.com/ZeljkoBenovic/mikrotik-operator/blob/main/examples/gateway-api.yaml).
 
