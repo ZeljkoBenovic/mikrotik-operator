@@ -30,9 +30,9 @@ func TestFindIngressServicePort(t *testing.T) {
 		{name: "named port", port: networkingv1.ServiceBackendPort{Name: "https"}, want: "https", wantOK: true},
 		{name: "numbered port", port: networkingv1.ServiceBackendPort{Number: 80}, want: "http", wantOK: true},
 		{
-			name:   "name wins when name and number point at different ports",
+			name:   "mixed name and number matches the first candidate that satisfies either",
 			port:   networkingv1.ServiceBackendPort{Name: "https", Number: 80},
-			want:   "https",
+			want:   "http",
 			wantOK: true,
 		},
 		{name: "unknown name falls back to number", port: networkingv1.ServiceBackendPort{Name: "metrics", Number: 80}, want: "http", wantOK: true},

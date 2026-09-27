@@ -11,43 +11,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+func routeGatewayService() corev1.Service {
+	return corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"}}
+}
+
+func routeGatewayNode(name string, addresses ...corev1.NodeAddress) *corev1.Node {
+	return &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Status:     corev1.NodeStatus{Addresses: addresses},
+	}
+}
+
 func TestRouteGateways(t *testing.T) {
 	t.Parallel()
-
-	service := corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
-	}
-	nodeA := corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
-		Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
-			{Type: corev1.NodeHostName, Address: "node-a"},
-			{Type: corev1.NodeInternalIP, Address: "192.0.2.11"},
-		}},
-	}
-	nodeB := corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "node-b"},
-		Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
-			{Type: corev1.NodeInternalIP, Address: "192.0.2.10"},
-			{Type: corev1.NodeInternalIP, Address: "192.0.2.99"},
-		}},
-	}
-	duplicate := corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "node-dup"},
-		Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
-			{Type: corev1.NodeInternalIP, Address: "192.0.2.10"},
-		}},
-	}
-	hostnameOnly := corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "node-host"},
-		Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
-			{Type: corev1.NodeHostName, Address: "node-host"},
-		}},
-	}
 
 	t.Run("rejects unsupported route-mode", func(t *testing.T) {
 		t.Parallel()
 		kube := fake.NewClientBuilder().WithScheme(controllerTestScheme(t)).Build()
-		service := service
+		service := routeGatewayService()
 		service.Annotations = map[string]string{api.RouteModeAnnotation: "bogus"}
 		_, err := routeGateways(context.Background(), kube, service)
 		if err == nil || !strings.Contains(err.Error(), api.RouteModeAnnotation) {
@@ -57,8 +38,23 @@ func TestRouteGateways(t *testing.T) {
 
 	t.Run("all-nodes returns unique sorted InternalIPs", func(t *testing.T) {
 		t.Parallel()
-		kube := fake.NewClientBuilder().WithScheme(controllerTestScheme(t)).WithObjects(&nodeA, &nodeB, &duplicate, &hostnameOnly).Build()
-		got, err := routeGateways(context.Background(), kube, service)
+		kube := fake.NewClientBuilder().WithScheme(controllerTestScheme(t)).WithObjects(
+			routeGatewayNode("node-a",
+				corev1.NodeAddress{Type: corev1.NodeHostName, Address: "node-a"},
+				corev1.NodeAddress{Type: corev1.NodeInternalIP, Address: "192.0.2.11"},
+			),
+			routeGatewayNode("node-b",
+				corev1.NodeAddress{Type: corev1.NodeInternalIP, Address: "192.0.2.10"},
+				corev1.NodeAddress{Type: corev1.NodeInternalIP, Address: "192.0.2.99"},
+			),
+			routeGatewayNode("node-dup",
+				corev1.NodeAddress{Type: corev1.NodeInternalIP, Address: "192.0.2.10"},
+			),
+			routeGatewayNode("node-host",
+				corev1.NodeAddress{Type: corev1.NodeHostName, Address: "node-host"},
+			),
+		).Build()
+		got, err := routeGateways(context.Background(), kube, routeGatewayService())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -75,8 +71,15 @@ func TestRouteGateways(t *testing.T) {
 
 	t.Run("single-node returns exactly one InternalIP", func(t *testing.T) {
 		t.Parallel()
-		kube := fake.NewClientBuilder().WithScheme(controllerTestScheme(t)).WithObjects(&nodeA, &nodeB).Build()
-		service := service
+		kube := fake.NewClientBuilder().WithScheme(controllerTestScheme(t)).WithObjects(
+			routeGatewayNode("node-a",
+				corev1.NodeAddress{Type: corev1.NodeInternalIP, Address: "192.0.2.11"},
+			),
+			routeGatewayNode("node-b",
+				corev1.NodeAddress{Type: corev1.NodeInternalIP, Address: "192.0.2.10"},
+			),
+		).Build()
+		service := routeGatewayService()
 		service.Annotations = map[string]string{api.RouteModeAnnotation: "single-node"}
 		got, err := routeGateways(context.Background(), kube, service)
 		if err != nil {
@@ -92,8 +95,12 @@ func TestRouteGateways(t *testing.T) {
 
 	t.Run("no InternalIP is an error", func(t *testing.T) {
 		t.Parallel()
-		kube := fake.NewClientBuilder().WithScheme(controllerTestScheme(t)).WithObjects(&hostnameOnly).Build()
-		_, err := routeGateways(context.Background(), kube, service)
+		kube := fake.NewClientBuilder().WithScheme(controllerTestScheme(t)).WithObjects(
+			routeGatewayNode("node-host",
+				corev1.NodeAddress{Type: corev1.NodeHostName, Address: "node-host"},
+			),
+		).Build()
+		_, err := routeGateways(context.Background(), kube, routeGatewayService())
 		if err == nil || !strings.Contains(err.Error(), "no node InternalIP") {
 			t.Fatalf("error = %v, want no node InternalIP", err)
 		}
