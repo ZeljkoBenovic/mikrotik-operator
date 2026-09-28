@@ -83,6 +83,18 @@ describe('managedLabel', () => {
       ),
     ).toBe('Ingress/public')
   })
+
+  it('omits a blank managedBy namespace', () => {
+    expect(
+      managedLabel(
+        resource({
+          metadata: { name: 'web' },
+          spec: {},
+          managedBy: { apiVersion: 'v1', kind: 'Node', name: 'edge' },
+        }),
+      ),
+    ).toBe('Node/edge')
+  })
 })
 
 describe('isReady', () => {
