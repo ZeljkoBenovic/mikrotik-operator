@@ -394,7 +394,10 @@ type recordingRouterClient struct {
 	deletedForwards          int
 	deletedFirewall          int
 	deletedManaged           int
+	ensuredDNSNames          []string
 	ensuredDNSAddresses      []string
+	ensuredDNSTTLs           []string
+	ensuredDNSComments       []string
 	ensuredRouteGateways     []string
 	ensuredRouteDestinations []string
 	ensuredRouteDistances    []int32
@@ -409,9 +412,12 @@ type recordingRouterClient struct {
 	importErr                error
 }
 
-func (client *recordingRouterClient) EnsureDNS(_ context.Context, _, address, _, _ string) error {
+func (client *recordingRouterClient) EnsureDNS(_ context.Context, name, address, ttl, comment string) error {
 	client.ensuredDNS++
+	client.ensuredDNSNames = append(client.ensuredDNSNames, name)
 	client.ensuredDNSAddresses = append(client.ensuredDNSAddresses, address)
+	client.ensuredDNSTTLs = append(client.ensuredDNSTTLs, ttl)
+	client.ensuredDNSComments = append(client.ensuredDNSComments, comment)
 	return nil
 }
 func (client *recordingRouterClient) DeleteDNS(context.Context, string) error {

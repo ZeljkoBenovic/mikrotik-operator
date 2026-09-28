@@ -131,6 +131,9 @@ func TestHTTPRoutesForGatewayMapsParentRefs(t *testing.T) {
 	if len(requests) != 1 || requests[0].Name != "web" {
 		t.Fatalf("gateway mapping = %#v, want web", requests)
 	}
+	if requests := reconciler.httpRoutesForGateway(context.Background(), &corev1.Service{}); len(requests) != 0 {
+		t.Fatalf("non-gateway object mapped %d requests", len(requests))
+	}
 }
 
 func TestHTTPRoutesForGatewayClassMapsAttachedRoutes(t *testing.T) {
@@ -159,6 +162,9 @@ func TestHTTPRoutesForGatewayClassMapsAttachedRoutes(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "other"},
 	}); len(requests) != 0 {
 		t.Fatalf("unrelated gateway class mapped %d requests", len(requests))
+	}
+	if requests := reconciler.httpRoutesForGatewayClass(context.Background(), &corev1.Service{}); len(requests) != 0 {
+		t.Fatalf("non-gateway-class object mapped %d requests", len(requests))
 	}
 }
 

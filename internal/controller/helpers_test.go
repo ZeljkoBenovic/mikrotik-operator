@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
@@ -322,6 +323,104 @@ func TestPersistServiceRouteRouterTargetKeepsMissingChildHistory(t *testing.T) {
 	if len(refs) != 2 || refs[0] != "router-a" || refs[1] != "router-b" {
 		t.Fatalf("unexpected service router history: %v", refs)
 	}
+
+	updated, err = persistServiceRouteRouterTarget(context.Background(), kube, &service, "router-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated {
+		t.Fatal("duplicate router history was written again")
+	}
+}
+
+func TestPersistDurableRouterTargetNoopsWhenAlreadyRecorded(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	object := &api.MikroTikRoute{ObjectMeta: metav1.ObjectMeta{
+		Name:        "object",
+		Namespace:   "app",
+		Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a,router-b"},
+	}}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(object).Build()
+	updated, err := persistDurableRouterTarget(context.Background(), kube, object, "router-b", "router-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated {
+		t.Fatal("identical durable history was written again")
+	}
+}
+
+func TestPersistDurableRouterTargetCreatesAnnotationsMap(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	object := &api.MikroTikDNSRecord{ObjectMeta: metav1.ObjectMeta{Name: "object", Namespace: "app"}}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(object).Build()
+	updated, err := persistDurableRouterTarget(context.Background(), kube, object, "router-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated {
+		t.Fatal("missing annotations map was not created")
+	}
+	if object.GetAnnotations()[durableRouterTargetsAnnotation] != "router-a" {
+		t.Fatalf("annotation = %q, want router-a", object.GetAnnotations()[durableRouterTargetsAnnotation])
+	}
+}
+
+func TestCompactServiceRouteRouterTargetReplacesAndClearsAnnotation(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	service := corev1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name:        "backend",
+		Namespace:   "app",
+		Annotations: map[string]string{serviceRouteRouterAnnotation: "router-a,router-b"},
+	}}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&service).Build()
+
+	updated, err := compactServiceRouteRouterTarget(context.Background(), kube, &service, "router-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated {
+		t.Fatal("compact to a single target did not persist")
+	}
+	if service.Annotations[serviceRouteRouterAnnotation] != "router-b" {
+		t.Fatalf("annotation = %q, want router-b", service.Annotations[serviceRouteRouterAnnotation])
+	}
+
+	updated, err = compactServiceRouteRouterTarget(context.Background(), kube, &service, "router-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated {
+		t.Fatal("identical target was written again")
+	}
+
+	updated, err = compactServiceRouteRouterTarget(context.Background(), kube, &service, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated {
+		t.Fatal("clearing service route history did not persist")
+	}
+	if _, exists := service.Annotations[serviceRouteRouterAnnotation]; exists {
+		t.Fatalf("annotation still present: %q", service.Annotations[serviceRouteRouterAnnotation])
+	}
+
+	updated, err = compactServiceRouteRouterTarget(context.Background(), kube, &service, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated {
+		t.Fatal("missing annotation was written again")
+	}
 }
 
 func TestCompactDurableRouterTargetReplacesAndClearsAnnotation(t *testing.T) {
@@ -364,6 +463,75 @@ func TestCompactDurableRouterTargetReplacesAndClearsAnnotation(t *testing.T) {
 	}
 	if _, exists := object.GetAnnotations()[durableRouterTargetsAnnotation]; exists {
 		t.Fatalf("annotation still present: %q", object.GetAnnotations()[durableRouterTargetsAnnotation])
+	}
+
+	updated, err = compactDurableRouterTarget(context.Background(), kube, object, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated {
+		t.Fatal("missing durable annotation was written again")
+	}
+}
+
+func TestEnsureRouterActiveRejectsTerminatingAndUnfinalizedRouters(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	endpoint := api.RouterEndpoint{
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "credentials"},
+	}
+	now := metav1.Now()
+	tests := []struct {
+		name    string
+		router  api.MikroTikRouter
+		wantErr string
+	}{
+		{
+			name: "terminating",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "router",
+					Namespace:         "app",
+					Finalizers:        []string{resourceFinalizer},
+					DeletionTimestamp: &now,
+				},
+				Spec:   api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+				Status: api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+			},
+			wantErr: "is being deleted",
+		},
+		{
+			name: "missing finalizer",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app"},
+				Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+				Status:     api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{endpoint}},
+			},
+			wantErr: "is not finalized for external cleanup",
+		},
+		{
+			name: "empty durable history",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{Name: "router", Namespace: "app", Finalizers: []string{resourceFinalizer}},
+				Spec:       api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{endpoint}},
+			},
+			wantErr: "current endpoints are not durably recorded",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(test.router.DeepCopy()).Build()
+			err := ensureRouterActive(context.Background(), kube, test.router)
+			if err == nil {
+				t.Fatal("expected write-gate error")
+			}
+			if !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error = %v, want %q", err, test.wantErr)
+			}
+		})
 	}
 }
 
@@ -482,6 +650,17 @@ func TestAppendUniqueServicePort(t *testing.T) {
 	got = appendUniqueServicePort(got, https)
 	if len(got) != 2 || got[0] != http || got[1] != https {
 		t.Fatalf("ports = %#v, want [http https]", got)
+	}
+}
+
+func TestAppendUniqueService(t *testing.T) {
+	web := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"}}
+	db := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "app"}}
+	got := appendUniqueService(nil, web)
+	got = appendUniqueService(got, web)
+	got = appendUniqueService(got, db)
+	if len(got) != 2 || got[0].Name != "web" || got[1].Name != "db" {
+		t.Fatalf("services = %#v, want [web db]", got)
 	}
 }
 

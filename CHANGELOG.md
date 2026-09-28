@@ -18,6 +18,9 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover DNS apply of hostname/TTL/managed comment after finalizer install,
+  leftover `service-route-router` annotation compact/clear, Ingress rules
+  without HTTP, and write-gate rejection of terminating or unfinalized routers.
 
 ## [0.4.0] - 2026-09-01
 
