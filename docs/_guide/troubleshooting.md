@@ -31,8 +31,10 @@ kubectl -n mikrotik-operator-system get lease mikrotik-operator -o yaml
 
 **Symptoms:**
 
-- `kubectl get mtbackup,mtrestore` shows the object with empty Role, Bytes,
-  Ready, or Target columns
+- `kubectl get mtbackup` shows Router from `spec.routerRef` but empty Role,
+  Bytes, and Ready columns
+- `kubectl get mtrestore` shows Backup from `spec.backupRef.name` but empty
+  Target and Ready columns
 - No `/export` or `/import` traffic to the router
 - The admin UI has no Backup or Restore pages
 

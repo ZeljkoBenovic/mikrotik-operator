@@ -78,8 +78,10 @@ reconcilers only. ClusterRole rules also omit `mikrotikbackups` and
 `mikrotikrestores`. Applying either kind stores the object in etcd and does
 not call RouterOS. The admin UI allowlist is the five reconciled kinds.
 
-Short names are `mtbackup` and `mtrestore`. Printer columns (Role, Bytes,
-Ready, Target) stay empty until a reconciler writes status.
+Short names are `mtbackup` and `mtrestore`. Spec-backed printer columns
+populate without a reconciler (`Router` from `spec.routerRef`, `Backup`
+from `spec.backupRef.name`). Status columns (Role, Bytes, Ready, Target)
+stay empty until a reconciler writes status.
 
 The published `v1alpha1` schema is:
 
