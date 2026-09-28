@@ -8,9 +8,11 @@ redirect_from:
 
 # Troubleshooting
 
-Use resource conditions first, then operator logs. Every custom resource has a
-single `Ready` condition. Failure reasons are `ConnectionFailed` on routers and
-`ApplyFailed` on managed objects. The `message` is the last reconcile error.
+Use resource conditions first, then operator logs. Reconciled custom resources
+have a single `Ready` condition. Failure reasons are `ConnectionFailed` on
+routers and `ApplyFailed` on managed objects. The `message` is the last
+reconcile error. `MikroTikBackup` and `MikroTikRestore` are not reconciled
+and never receive that condition.
 
 ```sh
 kubectl get mikrotikrouters,mikrotikdnsrecords,mikrotikroutes,mikrotikportforwards,mikrotikfirewallrules -A
@@ -24,6 +26,31 @@ reconciles RouterOS. Check which replica holds the lease if logs look idle:
 ```sh
 kubectl -n mikrotik-operator-system get lease mikrotik-operator -o yaml
 ```
+
+## Problem: MikroTikBackup or MikroTikRestore does nothing
+
+**Symptoms:**
+
+- `kubectl get mtbackup` shows Router from `spec.routerRef` but empty Role,
+  Bytes, and Ready columns
+- `kubectl get mtrestore` shows Backup from `spec.backupRef.name` but empty
+  Target and Ready columns
+- No `/export` or `/import` traffic to the router
+- The admin UI has no Backup or Restore pages
+
+**Cause:** Chart `0.5.0` installs the CRDs and printer columns. The operator
+does not watch those kinds. `controller.Setup` registers router, DNS, Service,
+Ingress, HTTPRoute, route, firewall, and port-forward reconcilers only.
+ClusterRole rules omit `mikrotikbackups` and `mikrotikrestores`. The UI
+allowlists the five reconciled kinds.
+
+**Solution:** Do not use these kinds for operational backups yet. Take a
+RouterOS `/export` outside the operator, or wait for a release that wires
+the reconcilers, ClusterRole rules, and UI. See
+[Reference]({% link _reference/reference.md %}#backup-and-restore-api-preview).
+
+**Verification:** Operator logs never mention those kinds. The operator
+ClusterRole lists five MikroTik resources, not seven.
 
 ## Problem: implicit router selection is invalid
 
@@ -108,6 +135,44 @@ renaming an endpoint does not count as a new device.
 **Solution:** Keep one router object per device. Split HA pairs with different
 addresses under `spec.routers`.
 
+## Problem: generated DNS, route, or NAT children disappear or stay unready
+
+**Symptoms:**
+
+- Owned children are deleted after you add a second Service, Ingress, or
+  HTTPRoute
+- Reconcile errors mention `generated child configuration is ambiguous` or
+  `generated child conflicts with another owner`
+- ClusterIP routing fails with `route ... already exists and is not owned by`
+
+**Cause:** Annotation and Gateway translators create child CRs; they do not
+adopt objects they do not own. The same hostname, or the same
+`public-ip:port/protocol` pair, cannot target two different Services. A
+standalone CR that already occupies the generated name blocks the child.
+Ambiguous or invalid router selection also deletes previously generated
+children so stale NAT or DNS is not left behind.
+
+Generated names to look for:
+
+| Parent | Child | Name |
+| --- | --- | --- |
+| Annotated Service | `MikroTikDNSRecord` | `<service>-dns` (truncated to 63 characters) |
+| Ingress hostname | `MikroTikDNSRecord` | `ing-<hash>` |
+| HTTPRoute hostname | `MikroTikDNSRecord` | `httproute-<hash>` |
+| ClusterIP Service | `MikroTikRoute` | `rt-<hash>` |
+| `public-ip` NAT | `MikroTikPortForward` | `pf-<hash>` |
+
+**Solution:**
+
+1. Give each hostname and each `public-ip` plus port and protocol a single
+   backend Service.
+2. Rename or delete the standalone CR that collides with the generated name.
+3. Set an explicit `routerRef` or `mikrotik.operator.io/router-ref` when more
+   than one router exists.
+
+**Verification:** Owned children return to `Ready=True` after the collision
+or ambiguity is removed.
+
 ## Problem: Ingress or HTTPRoute creates nothing
 
 **Symptoms:**
@@ -130,6 +195,27 @@ namespace policy). Cross-namespace Service backends also need a Gateway API
    Gateway API CRDs separately.
 3. Put HTTPRoute hostnames on the route or the Gateway listener.
 4. Headless Services (`clusterIP: None`) and non-TCP/UDP ports are skipped.
+
+## Problem: deleting a CR left RouterOS rules behind
+
+**Symptoms:**
+
+- The Kubernetes object is gone
+- `/ip dns static`, `/ip route`, or NAT/filter entries with
+  `managed-by=mikrotik-operator/...` remain
+
+**Cause:** Cleanup runs only while the `mikrotik.operator.io/managed-config`
+finalizer is present. A `kubectl apply` or replace that omits `finalizers`
+can drop it. The admin UI PUT path keeps the existing finalizers, owner
+references, UID, and generation so a spec-only save does not skip cleanup.
+
+**Solution:** Do not strip operator finalizers. If rules are already
+orphaned, delete only entries whose comment matches that resource. Recreate
+the CR if you still need the configuration.
+
+**Verification:** `kubectl get <kind> <name> -o jsonpath='{.metadata.finalizers}'`
+shows `mikrotik.operator.io/managed-config` before delete. After delete, the
+managed RouterOS comment is gone.
 
 ## Problem: admin UI rejects edit or delete
 
