@@ -13,7 +13,37 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-func TestDNSReconcilerAddsFinalizerThenAppliesHostnameTTLAndComment(t *testing.T) {
+func TestDNSReconcilerAddsFinalizerBeforeRouterOS(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+		Spec:       api.MikroTikDNSRecordSpec{Name: "web.home.arpa", Address: "10.0.0.8"},
+	}
+	dials := 0
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&record).WithStatusSubresource(&record).Build()
+	reconciler := DNSReconciler{
+		Client: kube,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			dials++
+			return nil, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if dials != 0 {
+		t.Fatalf("unfinalized DNS record dialed RouterOS %d times", dials)
+	}
+	var stored api.MikroTikDNSRecord
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
+		t.Fatal("first reconcile did not add the managed-config finalizer")
+	}
+}
+
+func TestDNSReconcilerAppliesHostnameTTLAndComment(t *testing.T) {
 	scheme := controllerTestScheme(t)
 	endpoint := api.RouterEndpoint{
 		Name:              "primary",
@@ -27,7 +57,12 @@ func TestDNSReconcilerAddsFinalizerThenAppliesHostnameTTLAndComment(t *testing.T
 	}
 	secret := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "app"}}
 	record := api.MikroTikDNSRecord{
-		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "web",
+			Namespace:   "app",
+			Finalizers:  []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: router.Name},
+		},
 		Spec: api.MikroTikDNSRecordSpec{
 			RouterRef: router.Name,
 			Name:      "web.home.arpa",
@@ -44,21 +79,6 @@ func TestDNSReconcilerAddsFinalizerThenAppliesHostnameTTLAndComment(t *testing.T
 	reconciler := DNSReconciler{Client: kube, Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
 		return routerClient, nil
 	}}
-
-	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
-		t.Fatal(err)
-	}
-	if routerClient.ensuredDNS != 0 {
-		t.Fatalf("first reconcile dialed RouterOS %d times", routerClient.ensuredDNS)
-	}
-	var stored api.MikroTikDNSRecord
-	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored); err != nil {
-		t.Fatal(err)
-	}
-	if !controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
-		t.Fatal("first reconcile did not add the managed-config finalizer")
-	}
-
 	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(record.Namespace, record.Name)); err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +95,7 @@ func TestDNSReconcilerAddsFinalizerThenAppliesHostnameTTLAndComment(t *testing.T
 	if len(routerClient.ensuredDNSComments) != 1 || routerClient.ensuredDNSComments[0] != wantComment {
 		t.Fatalf("DNS comments = %#v, want %q", routerClient.ensuredDNSComments, wantComment)
 	}
+	var stored api.MikroTikDNSRecord
 	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: record.Namespace, Name: record.Name}, &stored); err != nil {
 		t.Fatal(err)
 	}
