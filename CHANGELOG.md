@@ -18,6 +18,10 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover PortForward/Firewall/Route managed-config finalizer acquisition without
+  dialing RouterOS, PortForward IgnoreNotFound, incomplete router endpoint
+  validation and cleanup skipping, empty router-ref claim keys, Admin UI Ready
+  condition precedence, and typed UI kind condition extraction.
 
 ## [0.4.0] - 2026-09-01
 

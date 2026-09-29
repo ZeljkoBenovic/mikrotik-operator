@@ -49,4 +49,8 @@ describe('liveRouterRefOptions', () => {
 
     expect(options.map((option) => option.value)).toEqual(['core', 'network/edge'])
   })
+
+  it('treats a missing list as empty', () => {
+    expect(liveRouterRefOptions(undefined, 'app')).toEqual([])
+  })
 })

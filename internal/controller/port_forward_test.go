@@ -273,3 +273,55 @@ func TestReconcileServicePortForwardsUpdatesDestinationAddress(t *testing.T) {
 		t.Fatalf("updated spec.destinationAddress = %q, want 198.51.100.10", stored.Spec.DestinationAddress)
 	}
 }
+
+func TestPortForwardReconcilerIgnoresMissingObject(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	kube := fake.NewClientBuilder().WithScheme(scheme).Build()
+	reconciler := PortForwardReconciler{Client: kube}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "missing")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPortForwardReconcilerAddsManagedConfigFinalizerWithoutRouterOS(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"},
+		Spec: api.MikroTikPortForwardSpec{
+			RouterRef:     "router",
+			Protocol:      "tcp",
+			ExternalPort:  80,
+			TargetPort:    8080,
+			TargetAddress: "10.0.0.20",
+		},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&forward).
+		WithStatusSubresource(&forward).
+		Build()
+	dials := 0
+	reconciler := PortForwardReconciler{
+		Client: kube,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			dials++
+			return nil, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(forward.Namespace, forward.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if dials != 0 {
+		t.Fatalf("adding the managed-config finalizer dialed RouterOS %d times", dials)
+	}
+	var stored api.MikroTikPortForward
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: forward.Namespace, Name: forward.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
+		t.Fatal("managed-config finalizer was not added")
+	}
+	if stored.Status.Applied {
+		t.Fatal("port forward marked applied before RouterOS apply")
+	}
+}

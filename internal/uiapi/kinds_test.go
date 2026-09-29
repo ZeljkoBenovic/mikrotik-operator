@@ -2,6 +2,9 @@ package uiapi
 
 import (
 	"testing"
+
+	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestLookupKindAllowlist(t *testing.T) {
@@ -90,5 +93,17 @@ func TestLookupKindKnownPlurals(t *testing.T) {
 				t.Fatalf("gvk %#v", spec.gvk)
 			}
 		})
+	}
+}
+
+func TestObjectConditionsRejectsWrongType(t *testing.T) {
+	t.Parallel()
+
+	got := objectConditions(&api.MikroTikRouter{}, func(record *api.MikroTikDNSRecord) []metav1.Condition {
+		t.Fatal("typed callback should not run for a mismatched object")
+		return record.Status.Conditions
+	})
+	if got != nil {
+		t.Fatalf("objectConditions() = %#v, want nil", got)
 	}
 }

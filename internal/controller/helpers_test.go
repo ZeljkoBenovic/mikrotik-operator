@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	api "github.com/ZeljkoBenovic/mikrotik-operator/api/v1alpha1"
@@ -511,5 +512,88 @@ func TestPortForwardDestinationAddress(t *testing.T) {
 				t.Fatalf("portForwardDestinationAddress() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestValidateRouterEndpointsRejectsIncompleteEntries(t *testing.T) {
+	tests := []struct {
+		name    string
+		router  api.MikroTikRouter
+		wantErr string
+	}{
+		{
+			name: "missing legacy and routers",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+			},
+			wantErr: "requires a legacy address and credentialsSecret or at least one routers entry",
+		},
+		{
+			name: "empty endpoint address",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+				Spec: api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{{
+					Name:              "primary",
+					CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+				}}},
+			},
+			wantErr: "endpoint 0 has an empty address",
+		},
+		{
+			name: "empty endpoint credentials",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+				Spec: api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{{
+					Name:    "primary",
+					Address: "192.0.2.10",
+				}}},
+			},
+			wantErr: "endpoint 0 has an empty credentialsSecret",
+		},
+		{
+			name: "valid routers entry",
+			router: api.MikroTikRouter{
+				ObjectMeta: metav1.ObjectMeta{Name: "edge", Namespace: "app"},
+				Spec: api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{{
+					Name:              "primary",
+					Address:           "192.0.2.10",
+					CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+				}}},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateRouterEndpoints(test.router)
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateRouterEndpoints() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("validateRouterEndpoints() = %v, want %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestRouterCleanupEndpointsSkipsIncompleteEntries(t *testing.T) {
+	complete := api.RouterEndpoint{
+		Name:              "live",
+		Address:           "192.0.2.10",
+		CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+	}
+	incomplete := api.RouterEndpoint{
+		Name:    "stale",
+		Address: "192.0.2.11",
+	}
+	router := api.MikroTikRouter{
+		Spec:   api.MikroTikRouterSpec{Routers: []api.RouterEndpoint{complete}},
+		Status: api.MikroTikRouterStatus{AppliedEndpoints: []api.RouterEndpoint{complete, incomplete}},
+	}
+	got := routerCleanupEndpoints(router)
+	if len(got) != 1 || got[0].Address != complete.Address || got[0].CredentialsSecret.Name != complete.CredentialsSecret.Name {
+		t.Fatalf("cleanup endpoints = %#v, want only the complete applied endpoint", got)
 	}
 }

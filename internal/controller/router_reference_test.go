@@ -427,6 +427,18 @@ func TestRouterKeyFromRefNeverReturnsSlashName(t *testing.T) {
 			reference: "local-router",
 			want:      types.NamespacedName{Namespace: "mikrotik", Name: "local-router"},
 		},
+		{
+			name:      "empty reference",
+			namespace: "mikrotik",
+			reference: "  ",
+			want:      types.NamespacedName{},
+		},
+		{
+			name:      "slash with empty name",
+			namespace: "mikrotik",
+			reference: "network/",
+			want:      types.NamespacedName{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -470,5 +482,24 @@ func TestGetMikroTikRouterRejectsSlashInName(t *testing.T) {
 	}
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("error %v is not a not-found error", err)
+	}
+}
+
+func TestCanonicalRouterClaimKey(t *testing.T) {
+	tests := []struct {
+		name string
+		key  types.NamespacedName
+		want string
+	}{
+		{name: "empty name", key: types.NamespacedName{Namespace: "app", Name: ""}},
+		{name: "namespace and name", key: types.NamespacedName{Namespace: "app", Name: "edge"}, want: "app/edge"},
+		{name: "name without namespace", key: types.NamespacedName{Name: "edge"}, want: "/edge"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := canonicalRouterClaimKey(test.key); got != test.want {
+				t.Fatalf("canonicalRouterClaimKey(%#v) = %q, want %q", test.key, got, test.want)
+			}
+		})
 	}
 }
