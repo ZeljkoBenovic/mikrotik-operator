@@ -12,6 +12,13 @@ and the project follows semantic versioning.
 - `MikroTikBackup` and `MikroTikRestore` CRDs in chart package `0.5.0`.
   Operator `appVersion` remains `v0.4.0`.
 
+### Fixed
+
+- DNS and port-forward reconcilers no longer delete live RouterOS DNS or NAT
+  when a `serviceRef` or `podRef` target is NotFound. Recreating that Service
+  or Pod (Helm/GitOps replace) left a gap that previously wiped applied
+  entries. Observed non-addressable Services still clean up.
+
 ### Tests
 
 - Cover RouterOS `/ip/route` ensure/delete matching, `MikroTikRoute` apply/delete

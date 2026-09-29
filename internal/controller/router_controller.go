@@ -367,13 +367,8 @@ func (d *DNSReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 			types.NamespacedName{Name: o.Spec.ServiceRef.Name, Namespace: o.Spec.ServiceRef.Namespace},
 			&service,
 		); err != nil {
-			if apierrors.IsNotFound(err) {
-				for _, ref := range durableRouterTargets(&o, o.Status.RouterRef, o.Spec.RouterRef) {
-					if cleanupErr := d.cleanupConfiguration(ctx, &o, ref); cleanupErr != nil {
-						return d.status(ctx, &o, cleanupErr)
-					}
-				}
-			}
+			// A missing Service is often a delete/recreate gap (Helm/GitOps).
+			// Do not treat NotFound as "release the name" and delete live DNS.
 			return d.status(ctx, &o, err)
 		}
 		referencedService = service.DeepCopy()
@@ -2873,13 +2868,8 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 	if o.Spec.ServiceRef != nil {
 		var s corev1.Service
 		if err := p.Get(ctx, types.NamespacedName{Name: o.Spec.ServiceRef.Name, Namespace: o.Spec.ServiceRef.Namespace}, &s); err != nil {
-			if apierrors.IsNotFound(err) {
-				for _, ref := range durableRouterTargets(&o, o.Status.RouterRef, o.Spec.RouterRef) {
-					if cleanupErr := p.cleanupConfiguration(ctx, &o, ref); cleanupErr != nil {
-						return p.status(ctx, &o, cleanupErr)
-					}
-				}
-			}
+			// A missing Service is often a delete/recreate gap. Keep applied NAT
+			// until the Service is observed again or this CR is deleted.
 			return p.status(ctx, &o, err)
 		}
 		serviceTarget, addressErr := serviceAddress(ctx, p.Client, s)
@@ -2898,13 +2888,8 @@ func (p *PortForwardReconciler) Reconcile(ctx context.Context, req reconcile.Req
 	if address == "" && o.Spec.PodRef != nil {
 		var pod corev1.Pod
 		if err := p.Get(ctx, types.NamespacedName{Name: o.Spec.PodRef.Name, Namespace: o.Spec.PodRef.Namespace}, &pod); err != nil {
-			if apierrors.IsNotFound(err) {
-				for _, ref := range durableRouterTargets(&o, o.Status.RouterRef, o.Spec.RouterRef) {
-					if cleanupErr := p.cleanupConfiguration(ctx, &o, ref); cleanupErr != nil {
-						return p.status(ctx, &o, cleanupErr)
-					}
-				}
-			}
+			// A missing Pod is often a restart or recreate gap. Keep applied NAT
+			// until the Pod is observed again or this CR is deleted.
 			return p.status(ctx, &o, err)
 		}
 		address = pod.Status.PodIP

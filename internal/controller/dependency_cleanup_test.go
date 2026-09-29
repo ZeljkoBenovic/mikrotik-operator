@@ -49,6 +49,101 @@ func TestDNSNonAddressableServiceCleansEveryDurableRouter(t *testing.T) {
 	}
 }
 
+func TestDNSMissingServiceKeepsAppliedRouterOS(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	record := api.MikroTikDNSRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "dns", Namespace: "app", Finalizers: []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a,router-b"},
+		},
+		Spec: api.MikroTikDNSRecordSpec{
+			RouterRef: "router-b", Name: "service.example.com", Address: "10.43.0.10",
+			ServiceRef: &api.NamespacedName{Namespace: "app", Name: "service"},
+		},
+		Status: api.MikroTikDNSRecordStatus{Applied: true, RouterRef: "router-b"},
+	}
+	objects = append(objects, &record)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&record).Build()
+	reconciler := DNSReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "dns")); err != nil {
+		t.Fatal(err)
+	}
+	for name, routerClient := range clients {
+		if routerClient.deletedDNS != 0 || routerClient.ensuredDNS != 0 {
+			t.Fatalf("%s mutated RouterOS during Service NotFound: DNS deleted=%d ensured=%d", name, routerClient.deletedDNS, routerClient.ensuredDNS)
+		}
+	}
+	var stored api.MikroTikDNSRecord
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: "app", Name: "dns"}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status.Applied {
+		t.Fatal("missing Service still marked applied")
+	}
+	if !controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
+		t.Fatal("missing Service dropped the managed-config finalizer")
+	}
+}
+
+func TestPortForwardMissingServiceKeepsAppliedNAT(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "forward", Namespace: "app", Finalizers: []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a,router-b"},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			RouterRef: "router-b", Protocol: "tcp", ExternalPort: 80, TargetPort: 80,
+			ServiceRef: &api.NamespacedName{Namespace: "app", Name: "service"},
+		},
+		Status: api.MikroTikPortForwardStatus{Applied: true, RouterRef: "router-b", TargetAddress: "10.43.0.10"},
+	}
+	objects = append(objects, &forward)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&forward).Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "forward")); err != nil {
+		t.Fatal(err)
+	}
+	for name, routerClient := range clients {
+		if routerClient.deletedForwards != 0 || routerClient.deletedFirewall != 0 || routerClient.ensuredForwards != 0 {
+			t.Fatalf("%s mutated RouterOS during Service NotFound: forwards deleted=%d firewall deleted=%d ensured=%d", name, routerClient.deletedForwards, routerClient.deletedFirewall, routerClient.ensuredForwards)
+		}
+	}
+	var stored api.MikroTikPortForward
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: "app", Name: "forward"}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status.Applied {
+		t.Fatal("missing Service still marked applied")
+	}
+}
+
+func TestPortForwardMissingPodKeepsAppliedNAT(t *testing.T) {
+	scheme, objects, factory, clients := externalCleanupFixture(t)
+	forward := api.MikroTikPortForward{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "forward", Namespace: "app", Finalizers: []string{resourceFinalizer},
+			Annotations: map[string]string{durableRouterTargetsAnnotation: "router-a,router-b"},
+		},
+		Spec: api.MikroTikPortForwardSpec{
+			RouterRef: "router-b", Protocol: "tcp", ExternalPort: 8080, TargetPort: 8080,
+			PodRef: &api.NamespacedName{Namespace: "app", Name: "backend"},
+		},
+		Status: api.MikroTikPortForwardStatus{Applied: true, RouterRef: "router-b", TargetAddress: "10.0.0.20"},
+	}
+	objects = append(objects, &forward)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&forward).Build()
+	reconciler := PortForwardReconciler{Client: kube, Factory: factory}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest("app", "forward")); err != nil {
+		t.Fatal(err)
+	}
+	for name, routerClient := range clients {
+		if routerClient.deletedForwards != 0 || routerClient.deletedFirewall != 0 {
+			t.Fatalf("%s mutated RouterOS during Pod NotFound: forwards deleted=%d firewall deleted=%d", name, routerClient.deletedForwards, routerClient.deletedFirewall)
+		}
+	}
+}
+
 func TestPortForwardNonAddressableServiceCleansEveryDurableRouter(t *testing.T) {
 	scheme, objects, factory, clients := externalCleanupFixture(t)
 	forward := api.MikroTikPortForward{
@@ -159,10 +254,10 @@ func TestPodPortForwardCleanupSurvivesApplyStatusConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := reconciler.Reconcile(context.Background(), request); !apierrors.IsConflict(err) {
-		t.Fatalf("got error %v, want cleanup status conflict", err)
+		t.Fatalf("got error %v, want missing-Pod status conflict", err)
 	}
-	if routerClient.deletedForwards == 0 || routerClient.deletedFirewall == 0 {
-		t.Fatalf("Pod deletion did not clean durable RouterOS state: forwards=%d firewall=%d", routerClient.deletedForwards, routerClient.deletedFirewall)
+	if routerClient.deletedForwards != 0 || routerClient.deletedFirewall != 0 {
+		t.Fatalf("Pod NotFound deleted applied NAT: forwards=%d firewall=%d", routerClient.deletedForwards, routerClient.deletedFirewall)
 	}
 }
 
