@@ -209,3 +209,40 @@ func TestFirewallRuleReconcilerCleansDurableTargetWhenRouterSelectionIsAmbiguous
 		t.Fatalf("durable router annotation = %q, want cleared", stored.Annotations[durableRouterTargetsAnnotation])
 	}
 }
+
+func TestFirewallRuleReconcilerAddsManagedConfigFinalizerWithoutRouterOS(t *testing.T) {
+	scheme := controllerTestScheme(t)
+	rule := api.MikroTikFirewallRule{
+		ObjectMeta: metav1.ObjectMeta{Name: "web-allow", Namespace: "app"},
+		Spec:       api.MikroTikFirewallRuleSpec{Chain: "forward", Action: "accept"},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&rule).
+		WithStatusSubresource(&rule).
+		Build()
+	dials := 0
+	reconciler := FirewallRuleReconciler{
+		Client: kube,
+		Factory: func(context.Context, string, int32, bool, string, string) (ros.Client, error) {
+			dials++
+			return nil, nil
+		},
+	}
+	if _, err := reconciler.Reconcile(context.Background(), reconcileRequest(rule.Namespace, rule.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if dials != 0 {
+		t.Fatalf("adding the managed-config finalizer dialed RouterOS %d times", dials)
+	}
+	var stored api.MikroTikFirewallRule
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: rule.Namespace, Name: rule.Name}, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !controllerutil.ContainsFinalizer(&stored, resourceFinalizer) {
+		t.Fatal("managed-config finalizer was not added")
+	}
+	if stored.Status.Applied {
+		t.Fatal("firewall rule marked applied before RouterOS apply")
+	}
+}

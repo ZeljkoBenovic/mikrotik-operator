@@ -107,10 +107,20 @@ describe('isReady', () => {
     ).toBe(false)
   })
 
-  it('falls back to connected and applied', () => {
-    expect(isReady(resource({ metadata: { name: 'edge' }, spec: {}, status: { connected: true } }))).toBe(true)
-    expect(isReady(resource({ metadata: { name: 'dns' }, spec: {}, status: { applied: true } }))).toBe(true)
-    expect(isReady(resource({ metadata: { name: 'dns' }, spec: {} }))).toBe(false)
+  it('prefers the Ready condition over connected and applied', () => {
+    expect(
+      isReady(
+        resource({
+          metadata: { name: 'edge' },
+          spec: {},
+          status: {
+            connected: true,
+            applied: true,
+            conditions: [{ type: 'Ready', status: 'False' }],
+          },
+        }),
+      ),
+    ).toBe(false)
   })
 })
 
