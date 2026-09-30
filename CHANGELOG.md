@@ -18,6 +18,8 @@ and the project follows semantic versioning.
   validation, DNS NodePort address selection, generated-child cleanup when
   public-IP router selection is ambiguous, and unowned cluster-route name
   collisions.
+- Cover Ingress/HTTPRoute backend de-duplication, ServiceRef/PodRef claim
+  identity, per-endpoint cluster-route gateways, and live-router filtering.
 
 ## [0.4.0] - 2026-09-01
 

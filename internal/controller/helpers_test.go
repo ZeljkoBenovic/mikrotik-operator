@@ -513,3 +513,85 @@ func TestPortForwardDestinationAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestAppendUniqueServiceKeepsCrossNamespaceNames(t *testing.T) {
+	appWeb := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "app"}}
+	otherWeb := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "other"}}
+	got := appendUniqueService(nil, appWeb)
+	got = appendUniqueService(got, appWeb)
+	got = appendUniqueService(got, otherWeb)
+	if len(got) != 2 || got[0].Namespace != "app" || got[1].Namespace != "other" {
+		t.Fatalf("services = %#v, want app/web then other/web", got)
+	}
+}
+
+func TestNamespacedNameFromAPI(t *testing.T) {
+	tests := []struct {
+		name      string
+		reference *api.NamespacedName
+		want      types.NamespacedName
+	}{
+		{name: "nil"},
+		{name: "empty", reference: &api.NamespacedName{}},
+		{name: "name only", reference: &api.NamespacedName{Name: "web"}, want: types.NamespacedName{Name: "web"}},
+		{
+			name:      "namespace and name",
+			reference: &api.NamespacedName{Namespace: "app", Name: "web"},
+			want:      types.NamespacedName{Namespace: "app", Name: "web"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := namespacedNameFromAPI(test.reference); got != test.want {
+				t.Fatalf("namespacedNameFromAPI() = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestEndpointRouteGatewayPrefersEndpointOverride(t *testing.T) {
+	tests := []struct {
+		name     string
+		router   api.MikroTikRouter
+		endpoint api.RouterEndpoint
+		want     string
+	}{
+		{
+			name:     "endpoint override",
+			router:   api.MikroTikRouter{Spec: api.MikroTikRouterSpec{RouteGateway: "10.9.9.9"}},
+			endpoint: api.RouterEndpoint{RouteGateway: "10.1.1.1"},
+			want:     "10.1.1.1",
+		},
+		{
+			name:   "router fallback",
+			router: api.MikroTikRouter{Spec: api.MikroTikRouterSpec{RouteGateway: "10.9.9.9"}},
+			want:   "10.9.9.9",
+		},
+		{name: "both empty"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := endpointRouteGateway(test.endpoint, test.router); got != test.want {
+				t.Fatalf("endpointRouteGateway() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestLiveRoutersSkipsTerminating(t *testing.T) {
+	now := metav1.Now()
+	live := api.MikroTikRouter{ObjectMeta: metav1.ObjectMeta{Name: "live", Namespace: "app"}}
+	terminating := api.MikroTikRouter{ObjectMeta: metav1.ObjectMeta{
+		Name: "gone", Namespace: "app", DeletionTimestamp: &now,
+	}}
+	if got := liveRouters(nil); len(got) != 0 {
+		t.Fatalf("nil list = %#v, want empty", got)
+	}
+	if got := liveRouters([]api.MikroTikRouter{terminating}); len(got) != 0 {
+		t.Fatalf("all terminating = %#v, want empty", got)
+	}
+	got := liveRouters([]api.MikroTikRouter{terminating, live})
+	if len(got) != 1 || got[0].Name != "live" {
+		t.Fatalf("mixed = %#v, want only live", got)
+	}
+}
