@@ -675,7 +675,6 @@ type portForwardReconcileRequest struct {
 	requireSelectedPorts bool
 	prepared             bool
 	candidates           []portForwardCandidate
-	retainExisting       bool
 }
 
 type portForwardCandidate struct {
@@ -1136,29 +1135,24 @@ func (i *IngressReconciler) Reconcile(ctx context.Context, req reconcile.Request
 			}
 		}
 	}
-	incompleteBackends := len(backendErrors) > 0
-	if !incompleteBackends {
-		for _, record := range existing.Items {
-			if !desired[record.Name] && metav1.IsControlledBy(&record, &ingress) {
-				if err := i.Delete(ctx, &record); err != nil {
-					return reconcile.Result{}, err
-				}
+	for _, record := range existing.Items {
+		if !desired[record.Name] && metav1.IsControlledBy(&record, &ingress) {
+			if err := i.Delete(ctx, &record); err != nil {
+				return reconcile.Result{}, err
 			}
 		}
 	}
-	portForwardRequest.retainExisting = incompleteBackends
 	if err := reconcileServicePortForwards(ctx, portForwardRequest); err != nil {
 		return reconcile.Result{}, err
 	}
 	if err := reconcileOwnedClusterRoutes(ctx, clusterRouteReconcileRequest{
-		kube:           i.Client,
-		scheme:         i.RuntimeScheme,
-		owner:          &ingress,
-		sourceName:     "ingress/" + ingress.Name,
-		namespace:      ingress.Namespace,
-		routerRef:      resolvedRouter,
-		services:       services,
-		retainExisting: incompleteBackends,
+		kube:       i.Client,
+		scheme:     i.RuntimeScheme,
+		owner:      &ingress,
+		sourceName: "ingress/" + ingress.Name,
+		namespace:  ingress.Namespace,
+		routerRef:  resolvedRouter,
+		services:   services,
 	}); err != nil {
 		return reconcile.Result{}, err
 	}
@@ -1458,29 +1452,24 @@ func (h *HTTPRouteReconciler) Reconcile(ctx context.Context, req reconcile.Reque
 			}
 		}
 	}
-	incompleteBackends := len(backendErrors) > 0
-	if !incompleteBackends {
-		for _, record := range existing.Items {
-			if !desired[record.Name] && metav1.IsControlledBy(&record, &route) {
-				if err := h.Delete(ctx, &record); err != nil {
-					return reconcile.Result{}, err
-				}
+	for _, record := range existing.Items {
+		if !desired[record.Name] && metav1.IsControlledBy(&record, &route) {
+			if err := h.Delete(ctx, &record); err != nil {
+				return reconcile.Result{}, err
 			}
 		}
 	}
-	portForwardRequest.retainExisting = incompleteBackends
 	if err := reconcileServicePortForwards(ctx, portForwardRequest); err != nil {
 		return reconcile.Result{}, err
 	}
 	if err := reconcileOwnedClusterRoutes(ctx, clusterRouteReconcileRequest{
-		kube:           h.Client,
-		scheme:         h.Scheme,
-		owner:          &route,
-		sourceName:     "httproute/" + route.Name,
-		namespace:      route.Namespace,
-		routerRef:      resolvedRouter,
-		services:       services,
-		retainExisting: incompleteBackends,
+		kube:       h.Client,
+		scheme:     h.Scheme,
+		owner:      &route,
+		sourceName: "httproute/" + route.Name,
+		namespace:  route.Namespace,
+		routerRef:  resolvedRouter,
+		services:   services,
 	}); err != nil {
 		return reconcile.Result{}, err
 	}
@@ -2483,9 +2472,6 @@ func reconcileServicePortForwards(ctx context.Context, request portForwardReconc
 				}
 			}
 		}
-	}
-	if request.retainExisting {
-		return nil
 	}
 	for _, forward := range existing.Items {
 		if !desired[forward.Name] && metav1.IsControlledBy(&forward, request.owner) {
