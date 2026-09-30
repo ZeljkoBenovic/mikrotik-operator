@@ -21,13 +21,14 @@ const clusterRouteOriginNodes = "nodes"
 const clusterRouteOriginBoth = "both"
 
 type clusterRouteReconcileRequest struct {
-	kube       client.Client
-	scheme     *runtime.Scheme
-	owner      client.Object
-	sourceName string
-	namespace  string
-	routerRef  string
-	services   []corev1.Service
+	kube           client.Client
+	scheme         *runtime.Scheme
+	owner          client.Object
+	sourceName     string
+	namespace      string
+	routerRef      string
+	services       []corev1.Service
+	retainExisting bool
 }
 
 type clusterRouteCandidate struct {
@@ -111,6 +112,9 @@ func reconcileOwnedClusterRoutes(ctx context.Context, request clusterRouteReconc
 		if err := request.kube.Update(ctx, &route); err != nil {
 			return err
 		}
+	}
+	if request.retainExisting {
+		return nil
 	}
 	for index := range existing.Items {
 		route := &existing.Items[index]
